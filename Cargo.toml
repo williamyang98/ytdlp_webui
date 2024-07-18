@@ -1,0 +1,18 @@
+[package]
+name = "ytdlp_server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = { version = "4.8.0" }
+clap = { version = "4.5.4", features = ["derive"] }
+env_logger = { version = "0.11.3" }
+lazy_static = { version = "1.5.0" }
+log = { version = "0.4.22" }
+r2d2 = { version = "0.8.10" }
+r2d2_sqlite = { version = "0.24" }
+regex = { version = "1.10.5" }
+rusqlite = { version = "0.31", features = ["bundled"] }
+threadpool = { version = "1.8.1" }
