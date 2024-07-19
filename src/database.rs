@@ -62,6 +62,7 @@ impl AudioExtension {
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum WorkerStatus {
+    None,
     Queued,
     Running,
     Finished,
@@ -70,19 +71,30 @@ pub enum WorkerStatus {
 
 generate_bidirectional_binding!(
     WorkerStatus, u8, u8,
-    (Queued, 0),
-    (Running, 1),
-    (Finished, 2),
-    (Failed, 3),
+    (None, 0),
+    (Queued, 1),
+    (Running, 2),
+    (Finished, 3),
+    (Failed, 4),
 );
 
 generate_bidirectional_binding!(
     WorkerStatus, &'static str, &str,
+    (None, "none"),
     (Queued, "queued"),
     (Running, "running"),
     (Finished, "finished"),
     (Failed, "failed"),
 );
+
+impl WorkerStatus {
+    pub fn is_busy(&self) -> bool {
+        match self {
+            WorkerStatus::Queued | WorkerStatus::Running => true,
+            WorkerStatus::None | WorkerStatus::Finished | WorkerStatus::Failed => false,
+        }
+    }
+}
 
 pub type DatabasePool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
 pub type DatabaseConnection = r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>;

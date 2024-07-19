@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use actix_web::{web, App, HttpServer};
 use clap::Parser;
+use dashmap::DashMap;
 use threadpool::ThreadPool;
 use ytdlp_server::{
     app::{AppConfig, WorkerThreadPool},
@@ -35,8 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_manager = r2d2_sqlite::SqliteConnectionManager::file(app_config.root.join("index.db"));
     let db_pool = DatabasePool::new(db_manager)?;
     setup_database(db_pool.get()?)?;
-    let download_cache: DownloadCache = Arc::new(Mutex::new(HashMap::<VideoId, DownloadState>::new()));
-    let transcode_cache: TranscodeCache = Arc::new(Mutex::new(HashMap::<TranscodeKey, TranscodeState>::new()));
+    let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, DownloadState>::new());
+    let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, TranscodeState>::new());
     let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_worker_threads)));
     // start server
     const API_PREFIX: &'static str = "/api/v1";
