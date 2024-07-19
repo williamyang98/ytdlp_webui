@@ -3,7 +3,7 @@ use std::io::{BufReader, BufWriter, BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use dashmap::DashMap;
 use num_traits::cast::FromPrimitive;

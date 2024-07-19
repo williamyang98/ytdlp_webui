@@ -55,8 +55,9 @@ impl AudioExtension {
     }
 }
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive)]
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive)]
 pub enum WorkerStatus {
+    #[default]
     None = 0,
     Queued = 1,
     Running = 2,
