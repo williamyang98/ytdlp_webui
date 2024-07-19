@@ -8,9 +8,8 @@ use std::thread;
 use dashmap::DashMap;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool};
 use crate::database::{
-    DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable,
-    delete_worker_entry, update_worker_fields, insert_worker_entry,
-    update_worker_status, select_worker_status, select_worker_fields,
+    DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable, 
+    update_worker_fields, insert_worker_entry, update_worker_status, select_worker_fields,
 };
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
 use crate::worker_download::{DownloadCache, DOWNLOAD_AUDIO_EXT};
@@ -169,23 +168,26 @@ pub fn try_start_transcode_worker(
             }
         });
         // wait for download worker
-        let download_state = download_cache.entry(key.video_id.clone()).or_default();
-        let worker_status = download_state.worker_status.clone();
-        drop(download_state);
-        let mut download_lock = worker_status.0.lock().unwrap();
-        loop {
-            match *download_lock {
-                WorkerStatus::Failed => {
-                    log::error!("Download failed so abandoning transcode: id={0}", key.as_str());
-                    return;
-                },
-                WorkerStatus::Finished => {
-                    log::debug!("Download finished so continuing to transcode: id={0}", key.as_str());
-                    break;
-                },
-                WorkerStatus::None | WorkerStatus::Queued | WorkerStatus::Running => {},
+        {
+            let download_state = download_cache.entry(key.video_id.clone()).or_default();
+            let worker_status = download_state.worker_status.clone();
+            // NOTE: Avoid deadlocking dashmap while transcode worker is queued
+            drop(download_state);
+            let mut download_lock = worker_status.0.lock().unwrap();
+            loop {
+                match *download_lock {
+                    WorkerStatus::Failed => {
+                        log::error!("Download failed so abandoning transcode: id={0}", key.as_str());
+                        return;
+                    },
+                    WorkerStatus::Finished => {
+                        log::debug!("Download finished so continuing to transcode: id={0}", key.as_str());
+                        break;
+                    },
+                    WorkerStatus::None | WorkerStatus::Queued | WorkerStatus::Running => {},
+                }
+                download_lock = worker_status.1.wait(download_lock).unwrap();
             }
-            download_lock = worker_status.1.wait(download_lock).unwrap();
         }
         // get audio path
         let audio_path: Option<String> = {
@@ -209,7 +211,7 @@ pub fn try_start_transcode_worker(
         *is_queued.borrow_mut() = true;
         drop(_dequeue_transcode);
         log::info!("Launching transcode process: {0}", key.as_str());
-        let res = enqueue_transcode_worker(audio_path, key.clone(),transcode_cache, app_config, db_pool);
+        let res = enqueue_transcode_worker(audio_path, key.clone(), transcode_cache, app_config, db_pool);
         match res {
             Ok(path) => log::info!("Transcode succeeded: path={0}", path.to_string_lossy()),
             Err(err) => log::error!("Transcode failed: id={0}, err={1:?}", key.as_str(), err),
@@ -288,7 +290,7 @@ fn enqueue_transcode_worker(
     let mut process = match process_res {
         Ok(process) => process,
         Err(err) => {
-            let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] ffmpeg failed to start: {err:?}")
+            writeln!(&mut system_log_writer.lock().unwrap(), "[error] ffmpeg failed to start: {err:?}")
                 .map_err(WorkerError::SystemWriteFail)?;
             return Err(TranscodeError::LoggedFail);
         }
@@ -374,17 +376,15 @@ fn enqueue_transcode_worker(
     stderr_thread.join().map_err(WorkerError::StderrThreadJoin)??;
     // shutdown process
     match process.try_wait() {
-        Ok(exit_result) => match exit_result {
-            Some(exit_status) => match exit_status.code() {
-                None => {},
-                Some(0) => {},
-                Some(code) => {
-                    writeln!(&mut system_log_writer.lock().unwrap(), "[error] ffmpeg failed with bad code: {code:?}")
-                        .map_err(WorkerError::SystemWriteFail)?;
-                    return Err(TranscodeError::LoggedFail);
-                },
-            },
+        Ok(None) => {},
+        Ok(Some(exit_status)) => match exit_status.code() {
             None => {},
+            Some(0) => {},
+            Some(code) => {
+                writeln!(&mut system_log_writer.lock().unwrap(), "[error] ffmpeg failed with bad code: {code:?}")
+                    .map_err(WorkerError::SystemWriteFail)?;
+                return Err(TranscodeError::LoggedFail);
+            },
         },
         Err(err) => {
             writeln!(&mut system_log_writer.lock().unwrap(), "[warn] ffmpeg process failed to join: {err:?}")

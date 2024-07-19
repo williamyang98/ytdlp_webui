@@ -21,6 +21,8 @@ pub fn defer<F: FnOnce()>(f: F) -> impl Drop {
 #[macro_export]
 macro_rules! generate_bidirectional_binding {
     ($type_enum:ty, $type_into:ty, $type_from:ty, $(($val_enum:ident, $val_bind:expr),)+) => {
+        // Making it symmetrical is not sensible for enums
+        #[allow(clippy::from_over_into)]
         impl Into<$type_into> for $type_enum {
             fn into(self) -> $type_into {
                 match self {

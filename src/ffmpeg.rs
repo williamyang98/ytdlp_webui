@@ -98,10 +98,10 @@ pub enum TimeParseError {
 impl Time {
     pub fn try_from_str(v: &str) -> Result<Self, TimeParseError> {
         type E = TimeParseError;
-        let mut parts: Vec<&str> = v.split(":"). collect();
+        let mut parts: Vec<&str> = v.split(':'). collect();
         parts.reverse();
         let mut time = Time::default();
-        if let Some(v) = parts.get(0) { time.milliseconds = v.parse().map_err(E::InvalidMilliseconds)?; }
+        if let Some(v) = parts.first() { time.milliseconds = v.parse().map_err(E::InvalidMilliseconds)?; }
         if let Some(v) = parts.get(1) { time.seconds = v.parse().map_err(E::InvalidSeconds)?; }
         if let Some(v) = parts.get(2) { time.minutes = v.parse().map_err(E::InvalidMinutes)?; }
         if let Some(v) = parts.get(3) { time.hours = v.parse().map_err(E::InvalidHours)?; }
@@ -110,10 +110,10 @@ impl Time {
     }
 }
 
-const FLOAT32_REGEX: &'static str = r"\d*[.]?\d+";
-const BYTES_REGEX: &'static str = r"[KMG]iB";
-const BITS_REGEX: &'static str = r"[kMG]?bits";
-const TIME_REGEX: &'static str = r"(?:\d+:)+\d+[.]\d+";
+const FLOAT32_REGEX: &str = r"\d*[.]?\d+";
+const BYTES_REGEX: &str = r"[KMG]iB";
+const BITS_REGEX: &str = r"[kMG]?bits";
+const TIME_REGEX: &str = r"(?:\d+:)+\d+[.]\d+";
 
 #[derive(Clone,Copy,Debug,Default)]
 pub struct TranscodeProgress {
@@ -138,23 +138,23 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
     let line = line.trim();
     if let Some(captures) = PROGRESS_REGEX.captures(line) {
         let size_bytes = {
-            let value: Option<u32> = captures.get(1).map(|m| m.as_str().parse().ok()).flatten();
-            let unit: Option<SizeBytes> = captures.get(2).map(|m| m.as_str().try_into().ok()).flatten();
+            let value: Option<u32> = captures.get(1).and_then(|m| m.as_str().parse().ok());
+            let unit: Option<SizeBytes> = captures.get(2).and_then(|m| m.as_str().try_into().ok());
             match (value, unit) {
                 (Some(value), Some(unit)) => Some(value as usize * unit.to_bytes()),
                 _ => None,
             }
         };
-        let time_elapsed: Option<Time> = captures.get(3).map(|m| Time::try_from_str(m.as_str()).ok()).flatten();
+        let time_elapsed: Option<Time> = captures.get(3).and_then(|m| Time::try_from_str(m.as_str()).ok());
         let speed_bits = {
-            let value: Option<f32> = captures.get(4).map(|m| m.as_str().parse().ok()).flatten();
-            let unit: Option<SizeBits> = captures.get(5).map(|m| m.as_str().try_into().ok()).flatten();
+            let value: Option<f32> = captures.get(4).and_then(|m| m.as_str().parse().ok());
+            let unit: Option<SizeBits> = captures.get(5).and_then(|m| m.as_str().try_into().ok());
             match (value, unit) {
                 (Some(value), Some(unit)) => Some((value * unit.to_bits() as f32) as usize),
                 _ => None,
             }
         };
-        let speed_factor: Option<u32> = captures.get(6).map(|m| m.as_str().parse().ok()).flatten();
+        let speed_factor: Option<u32> = captures.get(6).and_then(|m| m.as_str().parse().ok());
         let result = TranscodeProgress {
             size_bytes,
             time_elapsed,

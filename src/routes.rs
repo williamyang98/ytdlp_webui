@@ -1,7 +1,5 @@
 use actix_web::{web, HttpRequest, Responder};
-use crate::database::{
-    DatabasePool, VideoId, AudioExtension,
-};
+use crate::database::{DatabasePool, VideoId, AudioExtension};
 use crate::worker_download::{try_start_download_worker, DownloadCache, DOWNLOAD_AUDIO_EXT};
 use crate::worker_transcode::{try_start_transcode_worker, TranscodeCache, TranscodeKey};
 use crate::app::{AppConfig, WorkerThreadPool};
@@ -29,22 +27,24 @@ pub async fn request_audio(req: HttpRequest, path: web::Path<(String, String)>) 
     let worker_thread_pool: WorkerThreadPool = req.app_data::<WorkerThreadPool>().unwrap().clone();
     let app_config = req.app_data::<AppConfig>().unwrap().clone();
     // download audio file
+    log::debug!("Try start download worker: id={0}", transcode_key.as_str());
     let download_worker_status = try_start_download_worker(
         video_id.clone(),
         download_cache.clone(), app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
     );
-    log::debug!("Download worker: status={download_worker_status:?}, id={0}.{1}", video_id.as_str(), DOWNLOAD_AUDIO_EXT.as_str());
+    log::debug!("Download worker: status={download_worker_status:?}, id={0}", transcode_key.as_str());
     // skip transcode
     if audio_ext == DOWNLOAD_AUDIO_EXT {
         log::debug!("Audio file is in downloaded format already: {0}", audio_ext.as_str()); 
         return Ok("Skipping transcode since already in downloaded format".to_string());
     }
     // transcode
+    log::debug!("Try start transcode worker: id={0}", transcode_key.as_str());
     let transcode_worker_status = try_start_transcode_worker(
         transcode_key.clone(),
         download_cache, transcode_cache, app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
     );
     log::debug!("Transcode worker: status={transcode_worker_status:?}, id={0}.{1}", video_id.as_str(), audio_ext.as_str());
-    return Ok(format!("Queueing download and transcode threads for: id={0}.{1}", video_id.as_str(), audio_ext.as_str()));
+    Ok(format!("Queueing download and transcode threads for: id={0}.{1}", video_id.as_str(), audio_ext.as_str()))
 }
 

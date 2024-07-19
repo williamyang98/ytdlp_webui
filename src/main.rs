@@ -24,7 +24,8 @@ struct Args {
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    env_logger::init();
+    let mut env_logger_builder = env_logger::Builder::new();
+    env_logger_builder.filter_level(log::LevelFilter::Debug).init();
 
     let total_worker_threads: usize = match args.total_worker_threads {
         0 => std::thread::available_parallelism().map(|v| v.get()*4).unwrap_or(1),
@@ -39,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, TranscodeState>::new());
     let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_worker_threads)));
     // start server
-    const API_PREFIX: &'static str = "/api/v1";
+    const API_PREFIX: &str = "/api/v1";
     HttpServer::new(move || {
         App::new()
             .app_data(app_config.clone())

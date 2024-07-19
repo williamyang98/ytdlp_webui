@@ -8,9 +8,8 @@ use std::thread;
 use dashmap::DashMap;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool};
 use crate::database::{
-    DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable,
-    delete_worker_entry, update_worker_fields, insert_worker_entry,
-    update_worker_status, select_worker_status, select_worker_fields,
+    DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable, 
+    update_worker_fields, insert_worker_entry, update_worker_status, select_worker_fields,
 };
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
 use crate::ytdlp;
@@ -136,14 +135,14 @@ pub fn try_start_download_worker(
     }
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching download process: {0}.{1}", video_id.as_str(), DOWNLOAD_AUDIO_EXT.as_str());
-        let res = enqueue_download_worker(video_id.clone(),download_cache, app_config, db_pool);
+        let res = enqueue_download_worker(video_id.clone(), download_cache, app_config, db_pool);
         match res {
             Ok(path) => log::info!("Download succeeded: path={0}", path.to_string_lossy()),
             Err(err) => log::error!("Download failed: id={0}, err={1:?}", video_id.as_str(), err),
         }
     });
     *is_queue_success.borrow_mut() = true;
-    return Ok(WorkerStatus::Queued);
+    Ok(WorkerStatus::Queued)
 }
 
 fn enqueue_download_worker(
@@ -218,7 +217,7 @@ fn enqueue_download_worker(
     let mut process = match process_res {
         Ok(process) => process,
         Err(err) => {
-            let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] ytdlp failed to start: {err:?}")
+            writeln!(&mut system_log_writer.lock().unwrap(), "[error] ytdlp failed to start: {err:?}")
                 .map_err(WorkerError::SystemWriteFail)?;
             return Err(DownloadError::LoggedFail);
         }
@@ -318,17 +317,15 @@ fn enqueue_download_worker(
     stderr_thread.join().map_err(WorkerError::StderrThreadJoin)??;
     // shutdown process
     match process.try_wait() {
-        Ok(exit_result) => match exit_result {
-            Some(exit_status) => match exit_status.code() {
-                None => {},
-                Some(0) => {},
-                Some(code) => {
-                    writeln!(&mut system_log_writer.lock().unwrap(), "[error] ytdlp failed with bad code: {code:?}")
-                        .map_err(WorkerError::SystemWriteFail)?;
-                    return Err(DownloadError::LoggedFail);
-                },
-            },
+        Ok(None) => {},
+        Ok(Some(exit_status)) => match exit_status.code() {
             None => {},
+            Some(0) => {},
+            Some(code) => {
+                writeln!(&mut system_log_writer.lock().unwrap(), "[error] ytdlp failed with bad code: {code:?}")
+                    .map_err(WorkerError::SystemWriteFail)?;
+                return Err(DownloadError::LoggedFail);
+            },
         },
         Err(err) => {
             writeln!(&mut system_log_writer.lock().unwrap(), "[warn] ytdlp process failed to join: {err:?}")

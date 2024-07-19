@@ -47,9 +47,9 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn seed_directories(&self) -> Result<(), std::io::Error> {
-        std::fs::create_dir_all(self.data.to_owned())?;
-        std::fs::create_dir_all(self.download.to_owned())?;
-        std::fs::create_dir_all(self.transcode.to_owned())?;
+        std::fs::create_dir_all(&self.data)?;
+        std::fs::create_dir_all(&self.download)?;
+        std::fs::create_dir_all(&self.transcode)?;
         Ok(())
     }
 }

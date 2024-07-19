@@ -52,10 +52,10 @@ pub enum EtaParseError {
 impl Eta {
     pub fn try_from_str(v: &str) -> Result<Self, EtaParseError> {
         type E = EtaParseError;
-        let mut parts: Vec<&str> = v.split(":").collect();
+        let mut parts: Vec<&str> = v.split(':').collect();
         parts.reverse();
         let mut eta = Eta::default();
-        if let Some(v) = parts.get(0) { eta.seconds = v.parse().map_err(E::InvalidSeconds)?; }
+        if let Some(v) = parts.first() { eta.seconds = v.parse().map_err(E::InvalidSeconds)?; }
         if let Some(v) = parts.get(1) { eta.minutes = v.parse().map_err(E::InvalidMinutes)?; }
         if let Some(v) = parts.get(2) { eta.hours = v.parse().map_err(E::InvalidHours)?; }
         if let Some(v) = parts.get(3) { eta.days = v.parse().map_err(E::InvalidDays)?; }
@@ -71,10 +71,10 @@ pub struct DownloadProgress {
     pub eta: Option<Eta>,
 }
 
-const YOUTUBE_ID_REGEX: &'static str = r"[a-zA-Z0-9\\/.\-\_]+";
-const FLOAT32_REGEX: &'static str = r"\d*[.]?\d+";
-const UNIT_REGEX: &'static str = r"[KMG]iB";
-const ETA_REGEX: &'static str = r"[0-9:]+";
+const YOUTUBE_ID_REGEX: &str = r"[a-zA-Z0-9\\/.\-\_]+";
+const FLOAT32_REGEX: &str = r"\d*[.]?\d+";
+const UNIT_REGEX: &str = r"[KMG]iB";
+const ETA_REGEX: &str = r"[0-9:]+";
 
 #[derive(Debug)]
 pub enum ParsedStdoutLine {
@@ -95,24 +95,24 @@ pub fn parse_stdout_line(line: &str) -> Option<ParsedStdoutLine> {
     }
     let line = line.trim();
     if let Some(captures) = DOWNLOAD_PROGRESS_REGEX.captures(line) {
-        let percentage: Option<f32> = captures.get(1).map(|m| m.as_str().parse().ok()).flatten();
+        let percentage: Option<f32> = captures.get(1).and_then(|m| m.as_str().parse().ok());
         let size_bytes = {
-            let value: Option<f32> = captures.get(2).map(|m| m.as_str().parse().ok()).flatten();
-            let unit: Option<SizeBytes> = captures.get(3).map(|m| m.as_str().try_into().ok()).flatten();
+            let value: Option<f32> = captures.get(2).and_then(|m| m.as_str().parse().ok());
+            let unit: Option<SizeBytes> = captures.get(3).and_then(|m| m.as_str().try_into().ok());
             match (value, unit) {
                 (Some(value), Some(unit)) => Some((value * unit.to_bytes() as f32) as usize),
                 _ => None,
             }
         };
         let speed_bytes = {
-            let value: Option<f32> = captures.get(4).map(|m| m.as_str().parse().ok()).flatten();
-            let unit: Option<SizeBytes> = captures.get(5).map(|m| m.as_str().try_into().ok()).flatten();
+            let value: Option<f32> = captures.get(4).and_then(|m| m.as_str().parse().ok());
+            let unit: Option<SizeBytes> = captures.get(5).and_then(|m| m.as_str().try_into().ok());
             match (value, unit) {
                 (Some(value), Some(unit)) => Some((value * unit.to_bytes() as f32) as usize),
                 _ => None,
             }
         };
-        let eta: Option<Eta> = captures.get(6).map(|m| Eta::try_from_str(m.as_str()).ok()).flatten();
+        let eta: Option<Eta> = captures.get(6).and_then(|m| Eta::try_from_str(m.as_str()).ok());
         let result = DownloadProgress {
             percentage,
             size_bytes,

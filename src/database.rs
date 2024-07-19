@@ -18,15 +18,7 @@ impl VideoId {
         if id.len() != VALID_YOUTUBE_ID_LENGTH {
             return Err(VideoIdError::InvalidLength { expected: VALID_YOUTUBE_ID_LENGTH, given: id.len() });
         }
-        let invalid_char = id.chars().find(|c| {
-            match c {
-                'A'..='Z' => false,
-                'a'..='z' => false,
-                '0'..='9' => false,
-                '-' | '_' => false,
-                _ => true,
-            }
-        });
+        let invalid_char = id.chars().find(|c| !matches!(c, 'A'..='Z'|'a'..='z'|'0'..='9'|'-'|'_'));
         if let Some(c) = invalid_char {
             return Err(VideoIdError::InvalidCharacter(c));
         }
@@ -203,7 +195,7 @@ pub fn select_worker_status(
     let table: &'static str = table.into();
     let mut select_query = db_conn.prepare(format!("SELECT status FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str())
         .map_err(StatusFetchError::DatabasePrepare)?;
-    let status: Option<u8> = select_query.query_row(&[video_id.as_str(), audio_ext.as_str()], |row| row.get(0))
+    let status: Option<u8> = select_query.query_row([video_id.as_str(), audio_ext.as_str()], |row| row.get(0))
         .map_err(StatusFetchError::DatabaseQuery)?;
     let Some(status) = status else {
         return Err(StatusFetchError::MissingValue); 
@@ -230,9 +222,9 @@ where F: FnOnce(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
             query.push(',');
         }
     }
-    let _ = write!(&mut query, " FROM {table} WHERE video_id=?1 AND audio_ext=?2").expect("Query builder shouldn't fail");
+    write!(&mut query, " FROM {table} WHERE video_id=?1 AND audio_ext=?2").expect("Query builder shouldn't fail");
     let mut select_query = db_conn.prepare(query.as_str())?;
-    select_query.query_row(&[video_id.as_str(), audio_ext.as_str()], transform)
+    select_query.query_row([video_id.as_str(), audio_ext.as_str()], transform)
 }
 
 pub fn delete_worker_entry(
