@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
 use threadpool::ThreadPool;
 
 pub type WorkerThreadPool = Arc<Mutex<ThreadPool>>;
+pub type WorkerCacheEntry<T> = Arc<(Mutex<T>, Condvar)>;
 
 #[derive(Debug)]
 pub enum WorkerError {

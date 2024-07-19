@@ -6,7 +6,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use dashmap::DashMap;
-use crate::app::{AppConfig, WorkerError, WorkerThreadPool};
+use num_traits::cast::FromPrimitive;
+use serde::Serialize;
+use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
 use crate::database::{
     DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable, 
     update_worker_fields, insert_worker_entry, update_worker_status, select_worker_fields,
@@ -14,9 +16,9 @@ use crate::database::{
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
 use crate::ytdlp;
 
-#[derive(Debug, Clone)]
+#[derive(Clone,Copy,Debug,Serialize)]
 pub struct DownloadState {
-    pub worker_status: Arc<(Mutex<WorkerStatus>, Condvar)>,
+    pub worker_status: WorkerStatus,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
     pub downloaded_bytes: usize,
@@ -28,7 +30,7 @@ impl Default for DownloadState {
     fn default() -> Self {
         let curr_time = get_unix_time();
         Self {
-            worker_status: Arc::new((Mutex::new(WorkerStatus::None), Condvar::new())),
+            worker_status: WorkerStatus::None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
             downloaded_bytes: 0,
@@ -54,7 +56,7 @@ impl DownloadState {
     }
 }
 
-pub type DownloadCache = Arc<DashMap<VideoId, DownloadState>>;
+pub type DownloadCache = Arc<DashMap<VideoId, WorkerCacheEntry<DownloadState>>>;
 pub const DOWNLOAD_AUDIO_EXT: AudioExtension = AudioExtension::M4A;
 
 #[derive(Debug)]
@@ -87,13 +89,13 @@ pub fn try_start_download_worker(
     // check if download in progress (cache hit)
     {
         let download_state = download_cache.entry(video_id.clone()).or_default();
-        let mut worker_status = download_state.worker_status.0.lock().unwrap();
-        match *worker_status {
+        let mut state = download_state.0.lock().unwrap();
+        match state.worker_status {
             WorkerStatus::None | WorkerStatus::Failed => {
-                *worker_status = WorkerStatus::Queued;
-                download_state.worker_status.1.notify_all();
+                state.worker_status = WorkerStatus::Queued;
+                download_state.1.notify_all();
             },
-            WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(*worker_status),
+            WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(state.worker_status),
         }
     }
     // rollback download cache entry if enqueue failed
@@ -105,9 +107,8 @@ pub fn try_start_download_worker(
         move || {
             if !*is_queue_success.borrow() {
                 let download_state = download_cache.get(&video_id).unwrap();
-                let mut worker_status = download_state.worker_status.0.lock().unwrap();
-                *worker_status = WorkerStatus::None;
-                download_state.worker_status.1.notify_all();
+                download_state.0.lock().unwrap().worker_status = WorkerStatus::None;
+                download_state.1.notify_all();
             }
         }
     });
@@ -117,14 +118,14 @@ pub fn try_start_download_worker(
         let res: rusqlite::Result<(Option<WorkerStatus>, Option<String>)> = select_worker_fields(
             &db_conn, &video_id, DOWNLOAD_AUDIO_EXT, DB_TABLE,
             &["status", "audio_path"],
-            |row| Ok((TryFrom::<u8>::try_from(row.get(0)?).ok(), row.get(1)?)),
+            |row| Ok((WorkerStatus::from_u8(row.get(0)?), row.get(1)?)),
         );
         if let Ok((Some(status), Some(audio_path))) = res {
             let audio_path = PathBuf::from(audio_path);
             if status == WorkerStatus::Finished && audio_path.exists() {
                 let download_state = download_cache.entry(video_id.clone()).or_default();
-                *download_state.worker_status.0.lock().unwrap() = status;
-                download_state.worker_status.1.notify_all();
+                download_state.0.lock().unwrap().worker_status = status;
+                download_state.1.notify_all();
                 *is_queue_success.borrow_mut() = true;
                 return Ok(status);
             }
@@ -178,15 +179,15 @@ fn enqueue_download_worker(
             drop(db_conn);
             // NOTE: Do this after database update so changes are immediately visible
             let download_state = download_cache.entry(video_id.clone()).or_default();
-            *download_state.worker_status.0.lock().unwrap() = worker_status;
-            download_state.worker_status.1.notify_all();
+            download_state.0.lock().unwrap().worker_status = worker_status;
+            download_state.1.notify_all();
         }
     });
-    // avoid redownloading file if on disk already
-    if audio_path.exists() {
-        *is_downloaded.borrow_mut() = true;
-        return Ok(audio_path);
-    }
+    // TODO: avoid redownloading file if on disk already - make this an option
+    // if audio_path.exists() {
+    //     *is_downloaded.borrow_mut() = true;
+    //     return Ok(audio_path);
+    // }
     // logging files
     let stdout_log_path = app_config.download.join(format!("{}.stdout.log", video_id.as_str()));
     let stderr_log_path = app_config.download.join(format!("{}.stderr.log", video_id.as_str()));
@@ -205,7 +206,8 @@ fn enqueue_download_worker(
     let process_res = Command::new(app_config.ytdlp_binary.clone())
         .args([
             url.as_str(), 
-            "-x",
+            "--no-continue", // override existing files
+            "--extract-audio",
             "--audio-format", audio_ext.into(),
             "--write-info-json",
             "--output", audio_path.to_str().unwrap(),
@@ -225,8 +227,8 @@ fn enqueue_download_worker(
     // update as running
     {
         let download_state = download_cache.get(&video_id).unwrap();
-        *download_state.worker_status.0.lock().unwrap() = WorkerStatus::Running;
-        download_state.worker_status.1.notify_all();
+        download_state.0.lock().unwrap().worker_status = WorkerStatus::Running;
+        download_state.1.notify_all();
     }
     {
         let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
@@ -262,8 +264,8 @@ fn enqueue_download_worker(
                     None => (),
                     Some(ytdlp::ParsedStdoutLine::DownloadProgress(progress)) => {
                         log::debug!("[download] id={0}.{1} progress={progress:?}", video_id.as_str(), audio_ext.as_str());
-                        let mut download_state = download_cache.entry(video_id.clone()).or_default();
-                        download_state.update_from_ytdlp(progress);
+                        let download_state = download_cache.entry(video_id.clone()).or_default();
+                        download_state.0.lock().unwrap().update_from_ytdlp(progress);
                     },
                     Some(ytdlp::ParsedStdoutLine::InfoJsonPath(path)) => {
                         let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;

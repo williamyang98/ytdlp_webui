@@ -1,0 +1,23 @@
+<html>
+  <head>
+    <title>Youtube downloader webui</title>
+  </head>
+  <body>
+    <script src="/vendor/vue.3.4.3.global.prod.js"></script>
+    <form>
+      URL:
+      <input type="text" name="url"/>
+      <button>Submit</button>
+    </form>
+    <div id="app">{{ message }}</div>
+    <script>
+      const { createApp, ref } = Vue;
+      createApp({
+        setup() {
+          const message = ref("Hello Vue!");
+          return { message };
+        }
+      }).mount("#app")
+    </script>
+  </body>
+</html>

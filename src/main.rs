@@ -1,23 +1,24 @@
 use std::sync::{Arc, Mutex};
-use actix_web::{web, App, HttpServer};
+use actix_web::{middleware, web, App, HttpServer};
 use clap::Parser;
 use dashmap::DashMap;
 use threadpool::ThreadPool;
 use ytdlp_server::{
-    app::{AppConfig, WorkerThreadPool},
+    app::{AppConfig, WorkerThreadPool, WorkerCacheEntry},
     database::{DatabasePool, VideoId, setup_database},
     worker_download::{DownloadCache, DownloadState},
     worker_transcode::{TranscodeCache, TranscodeKey, TranscodeState},
     routes,
 };
 
-
-
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Maximum number of transcode threads
+    #[arg(long, default_value_t = 0)]
+    total_transcode_threads: usize,
     /// Maximum number of worker threads
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0)]
     total_worker_threads: usize,
 }
 
@@ -27,8 +28,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut env_logger_builder = env_logger::Builder::new();
     env_logger_builder.filter_level(log::LevelFilter::Debug).init();
 
+    let total_transcode_threads: usize = match args.total_transcode_threads {
+        0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
+        x => x,
+    };
     let total_worker_threads: usize = match args.total_worker_threads {
-        0 => std::thread::available_parallelism().map(|v| v.get()*4).unwrap_or(1),
+        0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
         x => x,
     };
     let app_config = AppConfig::default();
@@ -36,9 +41,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_manager = r2d2_sqlite::SqliteConnectionManager::file(app_config.root.join("index.db"));
     let db_pool = DatabasePool::new(db_manager)?;
     setup_database(db_pool.get()?)?;
-    let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, DownloadState>::new());
-    let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, TranscodeState>::new());
-    let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_worker_threads)));
+    let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, WorkerCacheEntry<DownloadState>>::new());
+    let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, WorkerCacheEntry<TranscodeState>>::new());
+    let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_transcode_threads)));
     // start server
     const API_PREFIX: &str = "/api/v1";
     HttpServer::new(move || {
@@ -48,10 +53,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .app_data(worker_thread_pool.clone())
             .app_data(download_cache.clone())
             .app_data(transcode_cache.clone())
-            .service(routes::index)
-            .service(web::scope(API_PREFIX).service(routes::request_audio))
+            .service(web::scope(API_PREFIX)
+                .service(routes::request_transcode)
+                .service(routes::delete_transcode)
+                .service(routes::get_downloads)
+                .service(routes::get_transcodes)
+                .service(routes::get_download_state)
+                .service(routes::get_transcode_state)
+            )
+            .service(actix_files::Files::new("/data", "./data/").show_files_listing())
+            .service(actix_files::Files::new("/", "./static/").index_file("index.html"))
+            .wrap(middleware::Compress::default())
+            .wrap(middleware::Logger::default())
     })
     .bind(("127.0.0.1", 8080))?
+    .workers(total_worker_threads)
     .run()
     .await?;
     Ok(())

@@ -1,12 +1,15 @@
+use serde::Serialize;
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::cast::{FromPrimitive, ToPrimitive};
 use crate::generate_bidirectional_binding;
 use crate::util::get_unix_time;
 
-#[derive(Clone,Debug,PartialEq,Eq,Hash)]
+#[derive(Clone,Debug,PartialEq,Eq,Hash,Serialize)]
 pub struct VideoId {
     id: String,
 }
 
-#[derive(Clone,Copy,Debug)]
+#[derive(Clone,Copy,Debug,Serialize)]
 pub enum VideoIdError {
     InvalidLength { expected: usize, given: usize },
     InvalidCharacter(char),
@@ -30,7 +33,7 @@ impl VideoId {
     }
 }
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq,Hash)]
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Hash,Serialize)]
 pub enum AudioExtension {
     M4A,
     AAC,
@@ -52,32 +55,14 @@ impl AudioExtension {
     }
 }
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive)]
 pub enum WorkerStatus {
-    None,
-    Queued,
-    Running,
-    Finished,
-    Failed,
+    None = 0,
+    Queued = 1,
+    Running = 2,
+    Finished = 3,
+    Failed = 4,
 }
-
-generate_bidirectional_binding!(
-    WorkerStatus, u8, u8,
-    (None, 0),
-    (Queued, 1),
-    (Running, 2),
-    (Finished, 3),
-    (Failed, 4),
-);
-
-generate_bidirectional_binding!(
-    WorkerStatus, &'static str, &str,
-    (None, "none"),
-    (Queued, "queued"),
-    (Running, "running"),
-    (Finished, "finished"),
-    (Failed, "failed"),
-);
 
 impl WorkerStatus {
     pub fn is_busy(&self) -> bool {
@@ -86,6 +71,31 @@ impl WorkerStatus {
             WorkerStatus::None | WorkerStatus::Finished | WorkerStatus::Failed => false,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct YtdlpRow {
+    pub video_id: VideoId,
+    pub audio_ext: AudioExtension,
+    pub status: WorkerStatus,
+    pub unix_time: u64,
+    pub infojson_path: Option<String>,
+    pub stdout_log_path: Option<String>,
+    pub stderr_log_path: Option<String>,
+    pub system_log_path: Option<String>,
+    pub audio_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FfmpegRow {
+    pub video_id: VideoId,
+    pub audio_ext: AudioExtension,
+    pub status: WorkerStatus,
+    pub unix_time: u64,
+    pub stdout_log_path: Option<String>,
+    pub stderr_log_path: Option<String>,
+    pub system_log_path: Option<String>,
+    pub audio_path: Option<String>,
 }
 
 pub type DatabasePool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
@@ -142,7 +152,7 @@ pub fn insert_worker_entry(
     let table: &'static str = table.into();
     db_conn.execute(
         format!("INSERT OR REPLACE INTO {table} (video_id, audio_ext, status, unix_time) VALUES (?1,?2,?3,?4)").as_str(),
-        (video_id.as_str(), audio_ext.as_str(), Into::<u8>::into(WorkerStatus::Queued), get_unix_time()),
+        (video_id.as_str(), audio_ext.as_str(), WorkerStatus::Queued as u8, get_unix_time()),
     )
 }
 
@@ -152,7 +162,7 @@ pub fn update_worker_status(
     let table: &'static str = table.into();
     db_conn.execute(
         format!("UPDATE {table} SET status=?3, unix_time=?4 WHERE video_id=?1 AND audio_ext=?2").as_str(),
-        (video_id.as_str(), audio_ext.as_str(), Into::<u8>::into(status), get_unix_time()),
+        (video_id.as_str(), audio_ext.as_str(), status.to_u8(), get_unix_time()),
     )
 }
 
@@ -200,7 +210,7 @@ pub fn select_worker_status(
     let Some(status) = status else {
         return Err(StatusFetchError::MissingValue); 
     };
-    let Some(status) = TryFrom::<u8>::try_from(status).ok() else {
+    let Some(status) = WorkerStatus::from_u8(status) else {
         return Err(StatusFetchError::InvalidEnumValue(status));
     };
     Ok(status)
@@ -235,4 +245,87 @@ pub fn delete_worker_entry(
         format!("DELETE FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str(),
         (video_id.as_str(), audio_ext.as_str()),
     )
+}
+
+pub fn select_ytdlp_entries(db_conn: &DatabaseConnection) -> Result<Vec<YtdlpRow>, rusqlite::Error> {
+    let table: &'static str = WorkerTable::YTDLP.into();
+    let mut stmt = db_conn.prepare(format!(
+        "SELECT video_id, audio_ext, status, unix_time, infojson_path,\
+         stdout_log_path, stderr_log_path, system_log_path, audio_path FROM {table}").as_str())?;
+
+    let row_iter = stmt.query_map([], |row| {
+        let video_id: Option<String> = row.get(0)?;
+        let video_id = video_id.expect("video_id is a primary key");
+        let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
+
+        let audio_ext: Option<String> = row.get(1)?;
+        let audio_ext = audio_ext.expect("audio_ext is a primary key");
+        let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
+
+        let status: Option<u8> = row.get(2)?;
+        let status = status.expect("status should be present");
+        let status = WorkerStatus::from_u8(status).expect("status should be valid");
+
+        let unix_time: Option<u64> = row.get(3)?;
+        let unix_time = unix_time.unwrap_or(0);
+
+        Ok(YtdlpRow {
+            video_id,
+            audio_ext,
+            status,
+            unix_time,
+            infojson_path: row.get(4)?,
+            stdout_log_path: row.get(5)?,
+            stderr_log_path: row.get(6)?,
+            system_log_path: row.get(7)?,
+            audio_path: row.get(8)?,
+        })
+    })?;
+
+    let mut entries = Vec::<YtdlpRow>::new();
+    for row in row_iter {
+        entries.push(row?);
+    }
+    Ok(entries)
+}
+
+pub fn select_ffmpeg_entries(db_conn: &DatabaseConnection) -> Result<Vec<FfmpegRow>, rusqlite::Error> {
+    let table: &'static str = WorkerTable::FFMPEG.into();
+    let mut stmt = db_conn.prepare(format!(
+        "SELECT video_id, audio_ext, status, unix_time,\
+         stdout_log_path, stderr_log_path, system_log_path, audio_path FROM {table}").as_str())?;
+
+    let row_iter = stmt.query_map([], |row| {
+        let video_id: Option<String> = row.get(0)?;
+        let video_id = video_id.expect("video_id is a primary key");
+        let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
+
+        let audio_ext: Option<String> = row.get(1)?;
+        let audio_ext = audio_ext.expect("audio_ext is a primary key");
+        let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
+
+        let status: Option<u8> = row.get(2)?;
+        let status = status.expect("status should be present");
+        let status = WorkerStatus::from_u8(status).expect("status should be valid");
+
+        let unix_time: Option<u64> = row.get(3)?;
+        let unix_time = unix_time.unwrap_or(0);
+
+        Ok(FfmpegRow {
+            video_id,
+            audio_ext,
+            status,
+            unix_time,
+            stdout_log_path: row.get(4)?,
+            stderr_log_path: row.get(5)?,
+            system_log_path: row.get(6)?,
+            audio_path: row.get(7)?,
+        })
+    })?;
+
+    let mut entries = Vec::<FfmpegRow>::new();
+    for row in row_iter {
+        entries.push(row?);
+    }
+    Ok(entries)
 }

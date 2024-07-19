@@ -6,7 +6,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use dashmap::DashMap;
-use crate::app::{AppConfig, WorkerError, WorkerThreadPool};
+use num_traits::FromPrimitive;
+use serde::Serialize;
+use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
 use crate::database::{
     DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable, 
     update_worker_fields, insert_worker_entry, update_worker_status, select_worker_fields,
@@ -27,9 +29,9 @@ impl TranscodeKey {
     }
 }
 
-#[derive(Clone,Debug)]
+#[derive(Debug,Clone,Copy,Serialize)]
 pub struct TranscodeState {
-    pub worker_status: Arc<(Mutex<WorkerStatus>, Condvar)>,
+    pub worker_status: WorkerStatus,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
     pub time_elapsed_microseconds: u64,
@@ -42,7 +44,7 @@ impl Default for TranscodeState {
     fn default() -> Self {
         let curr_time = get_unix_time();
         Self {
-            worker_status: Arc::new((Mutex::new(WorkerStatus::None), Condvar::new())),
+            worker_status: WorkerStatus::None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
             time_elapsed_microseconds: 0,
@@ -71,7 +73,7 @@ impl TranscodeState {
     }
 }
 
-pub type TranscodeCache = Arc<DashMap<TranscodeKey, TranscodeState>>;
+pub type TranscodeCache = Arc<DashMap<TranscodeKey, WorkerCacheEntry<TranscodeState>>>;
 
 #[derive(Debug)]
 pub enum TranscodeStartError {
@@ -103,13 +105,13 @@ pub fn try_start_transcode_worker(
     // check if transcode in progress (cache hit)
     {
         let transcode_state = transcode_cache.entry(key.clone()).or_default();
-        let mut worker_status = transcode_state.worker_status.0.lock().unwrap();
-        match *worker_status {
+        let mut state = transcode_state.0.lock().unwrap();
+        match state.worker_status {
             WorkerStatus::None | WorkerStatus::Failed => {
-                *worker_status = WorkerStatus::Queued;
-                transcode_state.worker_status.1.notify_all();
+                state.worker_status = WorkerStatus::Queued;
+                transcode_state.1.notify_all();
             },
-            WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(*worker_status),
+            WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(state.worker_status),
         }
     }
     // rollback transcode cache entry if enqueue failed
@@ -121,9 +123,8 @@ pub fn try_start_transcode_worker(
         move || {
             if !*is_queue_success.borrow() {
                 let transcode_state = transcode_cache.get(&key).unwrap();
-                let mut worker_status = transcode_state.worker_status.0.lock().unwrap();
-                *worker_status = WorkerStatus::None;
-                transcode_state.worker_status.1.notify_all();
+                transcode_state.0.lock().unwrap().worker_status = WorkerStatus::None;
+                transcode_state.1.notify_all();
             }
         }
     });
@@ -133,14 +134,14 @@ pub fn try_start_transcode_worker(
         let res: rusqlite::Result<(Option<WorkerStatus>, Option<String>)> = select_worker_fields(
             &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
             &["status", "audio_path"],
-            |row| Ok((TryFrom::<u8>::try_from(row.get(0)?).ok(), row.get(1)?)),
+            |row| Ok((WorkerStatus::from_u8(row.get(0)?), row.get(1)?)),
         );
         if let Ok((Some(status), Some(audio_path))) = res {
             let audio_path = PathBuf::from(audio_path);
             if status == WorkerStatus::Finished && audio_path.exists() {
                 let transcode_state = transcode_cache.entry(key.clone()).or_default();
-                *transcode_state.worker_status.0.lock().unwrap() = status;
-                transcode_state.worker_status.1.notify_all();
+                transcode_state.0.lock().unwrap().worker_status = status;
+                transcode_state.1.notify_all();
                 *is_queue_success.borrow_mut() = true;
                 return Ok(status);
             }
@@ -161,21 +162,17 @@ pub fn try_start_transcode_worker(
                 let is_queued = *is_queued.borrow();
                 if !is_queued {
                     let transcode_state = transcode_cache.get(&key).unwrap();
-                    let mut worker_status = transcode_state.worker_status.0.lock().unwrap();
-                    *worker_status = WorkerStatus::None;
-                    transcode_state.worker_status.1.notify_all();
+                    transcode_state.0.lock().unwrap().worker_status = WorkerStatus::None;
+                    transcode_state.1.notify_all();
                 }
             }
         });
         // wait for download worker
         {
-            let download_state = download_cache.entry(key.video_id.clone()).or_default();
-            let worker_status = download_state.worker_status.clone();
-            // NOTE: Avoid deadlocking dashmap while transcode worker is queued
-            drop(download_state);
-            let mut download_lock = worker_status.0.lock().unwrap();
+            let download_state = download_cache.entry(key.video_id.clone()).or_default().clone();
+            let mut download_lock = download_state.0.lock().unwrap();
             loop {
-                match *download_lock {
+                match download_lock.worker_status {
                     WorkerStatus::Failed => {
                         log::error!("Download failed so abandoning transcode: id={0}", key.as_str());
                         return;
@@ -186,7 +183,7 @@ pub fn try_start_transcode_worker(
                     },
                     WorkerStatus::None | WorkerStatus::Queued | WorkerStatus::Running => {},
                 }
-                download_lock = worker_status.1.wait(download_lock).unwrap();
+                download_lock = download_state.1.wait(download_lock).unwrap();
             }
         }
         // get audio path
@@ -254,15 +251,15 @@ fn enqueue_transcode_worker(
             drop(db_conn);
             // NOTE: Do this after database update so changes are immediately visible
             let transcode_state = transcode_cache.entry(key.clone()).or_default();
-            *transcode_state.worker_status.0.lock().unwrap() = worker_status;
-            transcode_state.worker_status.1.notify_all();
+            transcode_state.0.lock().unwrap().worker_status = worker_status;
+            transcode_state.1.notify_all();
         }
     });
-    // avoid retranscodeing file if on disk already
-    if audio_path.exists() {
-        *is_transcoded.borrow_mut() = true;
-        return Ok(audio_path);
-    }
+    // TODO: avoid retranscodeing file if on disk already - make this an option
+    // if audio_path.exists() {
+    //     *is_transcoded.borrow_mut() = true;
+    //     return Ok(audio_path);
+    // }
     // logging files
     let stdout_log_path = app_config.transcode.join(format!("{}.stdout.log", key.as_str()));
     let stderr_log_path = app_config.transcode.join(format!("{}.stderr.log", key.as_str()));
@@ -298,8 +295,8 @@ fn enqueue_transcode_worker(
     // update as running
     {
         let transcode_state = transcode_cache.get(&key).unwrap();
-        *transcode_state.worker_status.0.lock().unwrap() = WorkerStatus::Running;
-        transcode_state.worker_status.1.notify_all();
+        transcode_state.0.lock().unwrap().worker_status = WorkerStatus::Running;
+        transcode_state.1.notify_all();
     }
     {
         let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
@@ -362,8 +359,8 @@ fn enqueue_transcode_worker(
                     None => (),
                     Some(ffmpeg::ParsedStderrLine::TranscodeProgress(progress)) => {
                         log::debug!("[transcode] id={0} progress={progress:?}", key.as_str());
-                        let mut transcode_state = transcode_cache.entry(key.clone()).or_default();
-                        transcode_state.update_from_ffmpeg(progress);
+                        let transcode_state = transcode_cache.entry(key.clone()).or_default();
+                        transcode_state.0.lock().unwrap().update_from_ffmpeg(progress);
                     },
                 }
                 line.clear();
