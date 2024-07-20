@@ -193,9 +193,9 @@ pub async fn get_download_state(req: HttpRequest, path: web::Path<(String, Strin
     }
     let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
     if let Some(download_state) = download_cache.get(&video_id) {
-        let download_state = *download_state.0.lock().unwrap();
+        let download_state = download_state.0.lock().unwrap();
         if download_state.worker_status != WorkerStatus::None {
-            return Ok(HttpResponse::Ok().json(download_state));
+            return Ok(HttpResponse::Ok().json(download_state.clone()));
         }
     }
     Ok(HttpResponse::NotFound().finish())
@@ -215,9 +215,9 @@ pub async fn get_transcode_state(req: HttpRequest, path: web::Path<(String, Stri
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let transcode_cache = req.app_data::<TranscodeCache>().unwrap().clone();
     if let Some(transcode_state) = transcode_cache.get(&transcode_key) {
-        let transcode_state = *transcode_state.0.lock().unwrap();
+        let transcode_state = transcode_state.0.lock().unwrap();
         if transcode_state.worker_status != WorkerStatus::None {
-            return Ok(HttpResponse::Ok().json(transcode_state));
+            return Ok(HttpResponse::Ok().json(transcode_state.clone()));
         }
     }
     Ok(HttpResponse::NotFound().finish())

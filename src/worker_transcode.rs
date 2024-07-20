@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use dashmap::DashMap;
-use num_traits::FromPrimitive;
+use num_traits::{FromPrimitive,ToPrimitive};
 use serde::Serialize;
 use thiserror::Error;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
@@ -30,9 +30,11 @@ impl TranscodeKey {
     }
 }
 
-#[derive(Debug,Clone,Copy,Serialize)]
+#[derive(Debug,Clone,Serialize)]
 pub struct TranscodeState {
     pub worker_status: WorkerStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_reason: Option<String>,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
     pub time_elapsed_microseconds: u64,
@@ -46,6 +48,7 @@ impl Default for TranscodeState {
         let curr_time = get_unix_time();
         Self {
             worker_status: WorkerStatus::None,
+            fail_reason: None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
             time_elapsed_microseconds: 0,
@@ -119,7 +122,10 @@ pub fn try_start_transcode_worker(
         let mut state = transcode_state.0.lock().unwrap();
         match state.worker_status {
             WorkerStatus::None | WorkerStatus::Failed => {
-                state.worker_status = WorkerStatus::Queued;
+                *state = TranscodeState {
+                    worker_status: WorkerStatus::Queued,
+                    ..Default::default()
+                };
                 transcode_state.1.notify_all();
             },
             WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(state.worker_status),
@@ -134,7 +140,7 @@ pub fn try_start_transcode_worker(
         move || {
             if !*is_queue_success.borrow() {
                 let transcode_state = transcode_cache.get(&key).unwrap();
-                transcode_state.0.lock().unwrap().worker_status = WorkerStatus::None;
+                *transcode_state.0.lock().unwrap() = TranscodeState::default();
                 transcode_state.1.notify_all();
             }
         }
@@ -162,57 +168,56 @@ pub fn try_start_transcode_worker(
     }
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching transcode process: {0}", key.as_str());
-        let res = enqueue_transcode_worker(key.clone(), download_cache, transcode_cache, app_config, db_pool);
-        match res {
-            Ok(path) => log::info!("Transcode succeeded: path={0}", path.to_string_lossy()),
-            Err(err) => log::error!("Transcode failed: id={0}, err={1:?}", key.as_str(), err),
+        // setup logging
+        let system_log_path = app_config.transcode.join(format!("{}.system.log", key.as_str()));
+        let system_log_file = match std::fs::File::create(system_log_path.clone()) {
+            Ok(system_log_file) => system_log_file,
+            Err(err) => {
+                log::error!("Failed to create system log file: path={0}, err={1:?}", system_log_path.to_str().unwrap(), err);
+                return;
+            },
+        };
+        if let Ok(db_conn) = db_pool.get() {
+            let _ = update_worker_fields(
+                &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
+                &["system_log_path"], &[&system_log_path.to_str().unwrap()]
+            );
         }
+        let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
+        // launch process
+        let res = enqueue_transcode_worker(
+            key.clone(), download_cache.clone(), transcode_cache.clone(), 
+            app_config.clone(), db_pool.clone(), system_log_writer.clone(),
+        );
+        // update database
+        let (audio_path, worker_status, worker_error) = match res {
+            Ok(path) => (Some(path), WorkerStatus::Finished, None),
+            Err(err) => (None, WorkerStatus::Failed, Some(err)),
+        };
+        let db_conn = db_pool.get().unwrap();
+        update_worker_fields(
+            &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
+            &["audio_path", "status"], 
+            &[&audio_path.map(|p| p.to_str().unwrap().to_string()), &worker_status.to_u8().unwrap()],
+        ).unwrap();
+        drop(db_conn);
+        // NOTE: update cache so changes to database are visible to signal listeners
+        let transcode_state = transcode_cache.entry(key.clone()).or_default();
+        let mut state = transcode_state.0.lock().unwrap();
+        state.worker_status = worker_status;
+        state.fail_reason = worker_error.map(|e| e.to_string());
+        transcode_state.1.notify_all();
     });
     *is_queue_success.borrow_mut() = true;
     Ok(WorkerStatus::Queued)
 }
 
 fn enqueue_transcode_worker(
-    key: TranscodeKey, download_cache: DownloadCache, transcode_cache: TranscodeCache, 
-    app_config: AppConfig, db_pool: DatabasePool,
+    key: TranscodeKey, download_cache: DownloadCache, transcode_cache: TranscodeCache,
+    app_config: AppConfig, db_pool: DatabasePool, system_log_writer: Arc<Mutex<impl Write>>,
 ) -> Result<PathBuf, TranscodeError> {
     let filename = format!("{0}.{1}", key.video_id.as_str(), key.audio_ext.as_str());
     let audio_path = app_config.transcode.join(filename.as_str());
-    // update cache on exit
-    let is_transcoded = Rc::new(RefCell::new(false));
-    let _update_cache_and_database = defer({
-        let is_transcoded = is_transcoded.clone();
-        let key = key.clone();
-        let transcode_cache = transcode_cache.clone();
-        let db_pool = db_pool.clone();
-        let audio_path = audio_path.clone();
-        move || {
-            let is_transcoded = *is_transcoded.borrow();
-            let (audio_path, worker_status) = if is_transcoded { 
-                (Some(audio_path.to_str().unwrap().to_string()), WorkerStatus::Finished)
-            } else { 
-                (None, WorkerStatus::Failed)
-            };
-            let db_conn = match db_pool.get() {
-                Ok(db_conn) => db_conn,
-                Err(err) => return log::error!("Failed to get database connection: id={0}, err={1:?}", key.as_str(), err),
-            };
-            if let Err(err) = update_worker_status(&db_conn, &key.video_id, key.audio_ext, worker_status, DB_TABLE) {
-                return log::error!("Failed to worker status: id={0}, err={1:?}", key.as_str(), err);
-            }
-            if let Err(err) = update_worker_fields(
-                &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-                &["audio_path"], &[&audio_path],
-            ) {
-                return log::error!("Failed to update worker audio path: id={0}, err={1:?}", key.as_str(), err);
-            }
-            drop(db_conn);
-            // NOTE: Do this after database update so changes are immediately visible
-            let transcode_state = transcode_cache.entry(key.clone()).or_default();
-            transcode_state.0.lock().unwrap().worker_status = worker_status;
-            transcode_state.1.notify_all();
-        }
-    });
     // wait for download worker
     {
         let download_state = download_cache.entry(key.video_id.clone()).or_default().clone();
@@ -249,16 +254,6 @@ fn enqueue_transcode_worker(
     // logging files
     let stdout_log_path = app_config.transcode.join(format!("{}.stdout.log", key.as_str()));
     let stderr_log_path = app_config.transcode.join(format!("{}.stderr.log", key.as_str()));
-    let system_log_path = app_config.transcode.join(format!("{}.system.log", key.as_str()));
-    let system_log_file = std::fs::File::create(system_log_path.clone()).map_err(WorkerError::SystemLogCreate)?;
-    let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
-    {
-        let db_conn = db_pool.get()?;
-        let _ = update_worker_fields(
-            &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-            &["system_log_path"], &[&system_log_path.to_str().unwrap()]
-        )?;
-    }
     // spawn process
     let process_res = Command::new(app_config.ffmpeg_binary.clone())
         .args([
@@ -377,9 +372,7 @@ fn enqueue_transcode_worker(
             }
         },
     }
-    let audio_file_transcoded = audio_path.exists();
-    *is_transcoded.borrow_mut() = audio_file_transcoded;
-    if audio_file_transcoded {
+    if audio_path.exists() {
         Ok(audio_path)
     } else {
         Err(TranscodeError::MissingOutputFile(audio_path))

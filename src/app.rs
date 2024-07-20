@@ -8,8 +8,6 @@ pub type WorkerCacheEntry<T> = Arc<(Mutex<T>, Condvar)>;
 
 #[derive(Debug,Error)]
 pub enum WorkerError {
-    #[error("Failed to create system log: {0:?}")]
-    SystemLogCreate(std::io::Error),
     #[error("Failed to create stdout log: {0:?}")]
     StdoutLogCreate(std::io::Error),
     #[error("Failed to create stderr log: {0:?}")]
