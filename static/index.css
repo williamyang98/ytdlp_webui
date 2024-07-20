@@ -1,0 +1,239 @@
+table, th, td {
+  border: 1px solid black;
+}
+
+/* Common utility classes */
+
+* {
+  font-family: courier;
+}
+
+/* Button */
+.btn {
+  appearance: none;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+  border-radius: 6px;
+  box-shadow: rgba(27, 31, 35, 0.04) 0 1px 0, rgba(255, 255, 255, 0.25) 0 1px 0 inset;
+  box-sizing: border-box;
+  color: #24292E;
+  cursor: pointer;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  list-style: none;
+  padding: 5px 12px;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  white-space: nowrap;
+  word-wrap: break-word;
+  text-align: center;
+  background-color: buttonface;
+}
+
+button[disabled] {
+  opacity: .45;
+  pointer-events: none;
+}
+
+/* Button sizes are derived from bootstrap 4 */
+.btn.btn-xs {
+  padding: 1px 5px;
+  font-size: 10px;
+  line-height: 1.5;
+  border-radius: 3px;
+}
+
+.btn.btn-sm {
+  padding: 3px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  border-radius: 3px;
+}
+
+.btn.btn-lg {
+  padding: 10px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  border-radius: 6px;
+}
+
+.btn.btn-xl {
+  padding: 15px 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  border-radius: 6px;
+}
+
+/* Button grouping */
+.btn-group, .btn-group-vertical {
+  display: inline-block;
+  position: relative;
+  vertical-align: text-bottom;
+}
+
+/* Remove border radius from first, middle and last buttons correctly */
+.btn-group>.btn:not(:first-child):not(:last-child) {
+  border-radius: 0;
+}
+
+.btn-group>.btn:first-child:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.btn-group>.btn:last-child:not(:first-child) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.btn-group .btn+.btn, .btn-group .btn+.btn-group, .btn-group .btn-group+.btn, .btn-group .btn-group+.btn-group {
+  margin-left: -1px;
+}
+
+.btn-group-vertical>.btn, .btn-group>.btn {
+  position: relative;
+  float: left;
+}
+
+/* Helpers */
+.d-inline {
+  display: inline!important;
+}
+
+.d-block {
+  display: block!important;
+}
+
+.d-inline-block {
+  display: inline-block!important;
+}
+
+.d-flex {
+  display: -webkit-box!important;
+  display: -ms-flexbox!important;
+  display: flex!important;
+}
+
+.flex-row {
+  -webkit-box-orient: horizontal!important;
+  -webkit-box-direction: normal!important;
+  -ms-flex-direction: row!important;
+  flex-direction: row!important;
+}
+
+.flex-col {
+  -webkit-box-orient: vertical!important;
+  -webkit-box-direction: normal!important;
+  -ms-flex-direction: column!important;
+  flex-direction: column!important;
+}
+
+.flex-wrap {
+  flex-wrap: wrap;
+}
+
+.flex-row-reverse {
+  -webkit-box-orient: horizontal!important;
+  -webkit-box-direction: reverse!important;
+  -ms-flex-direction: row-reverse!important;
+  flex-direction: row-reverse!important;
+}
+
+.flex-col-reverse {
+  -webkit-box-orient: vertical!important;
+  -webkit-box-direction: reverse!important;
+  -ms-flex-direction: column-reverse!important;
+  flex-direction: column-reverse!important;
+}
+
+.flex-grow-1 {
+  -ms-flex-positive: 1!important;
+  flex-grow: 1!important;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+/* Grid */
+.grid-container {
+  display: grid;
+  column-gap: 5px;
+  row-gap: 5px;
+}
+
+/* Margin */
+.ml-auto {
+  margin-left: auto;
+}
+
+.mr-auto {
+  margin-right: auto;
+}
+
+.mx-auto {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.mt-auto {
+  margin-top: auto;
+}
+
+.mb-auto {
+  margin-top: auto;
+}
+
+.my-auto {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+/* Sizes */
+.h-25 {
+  height: 25%;
+}
+
+.h-50 {
+  height: 50%;
+}
+
+.h-75 {
+  height: 75%;
+}
+
+.h-100 {
+  height: 100%;
+}
+
+.w-25 {
+  width: 25%;
+}
+
+.w-50 {
+  width: 50%;
+}
+
+.w-75 {
+  width: 75%;
+}
+
+.w-100 {
+  width: 100%;
+}
+
+/* Text */
+.text-left {
+  text-align: left;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}

@@ -1,23 +1,95 @@
 <html>
   <head>
     <title>Youtube downloader webui</title>
+    <link rel="stylesheet" href="./index.css">
   </head>
   <body>
-    <script src="/vendor/vue.3.4.3.global.prod.js"></script>
     <form>
-      URL:
-      <input type="text" name="url"/>
-      <button>Submit</button>
     </form>
-    <div id="app">{{ message }}</div>
-    <script>
-      const { createApp, ref } = Vue;
-      createApp({
-        setup() {
-          const message = ref("Hello Vue!");
-          return { message };
-        }
-      }).mount("#app")
+    <template id="entry-description">
+      <table>
+        <tr><td>Filename</td><td>{{ entry.video_id }}.{{ entry.audio_ext }}</td></tr>
+        <tr><td>Status</td><td>{{ entry.status }}</td></tr>
+        <tr><td>Time</td><td>{{ entry.unix_time }}</td></tr>
+        <template v-if="entry.audio_path">
+          <tr><td>Audio</td><td><a :href="entry.audio_path.replaceAll('\\', '/')">Link</a></td></tr>
+        </template>
+        <template v-if="entry.infojson_path">
+          <tr><td>Metadata</td><td><a :href="entry.infojson_path.replaceAll('\\', '/')">Link</a></td></tr>
+        </template>
+        <template v-if="entry.stdout_log_path">
+          <tr><td>Stdout log</td><td><a :href="entry.stdout_log_path.replaceAll('\\', '/')">Link</a></td></tr>
+        </template>
+        <template v-if="entry.stderr_log_path">
+          <tr><td>Stderr log</td><td><a :href="entry.stderr_log_path.replaceAll('\\', '/')">Link</a></td></tr>
+        </template>
+        <template v-if="entry.system_log_path">
+          <tr><td>System log</td><td><a :href="entry.system_log_path.replaceAll('\\', '/')">Link</a></td></tr>
+        </template>
+      </table>
+    </template>
+    <div id="app">
+      <h2>Transcode request</h2>
+      <div>
+        <label>URL</label><input type="text" v-model="transcode_request.url" placeholder="Youtube URL"/>
+        <label>Format</label>
+        <select v-model="transcode_request.format">
+          <option value="mp3">mp3</option>
+          <option value="m4a">m4a</option>
+          <option value="webm">webm</option>
+          <option value="aac">aac</option>
+        </select>
+        <button @click="request_transcode()">Request</button>
+        <button @click="delete_transcode()">Delete</button>
+        <button @click="get_transcode_progress()">Get progress</button>
+        <br>
+        <ul>
+          <li v-if="transcode_request.url_error !== null">URL error: {{ transcode_request.url_error }}</li>
+          <li>Response: {{ transcode_request.response }}</li>
+          <li>Download state: {{ transcode_request.download_state }}</li>
+          <li>Transcode state: {{ transcode_request.transcode_state }}</li>
+        </ul>
+      </div>
+      <br>
+      <h2>Downloads</h2>
+      <button @click="refresh_downloads()">Refresh downloads</button>
+      <div class="d-flex flex-row">
+        <div>
+          <entry-description :entry="download_entry" v-if="download_entry !== undefined"/>
+        </div>
+        <div>
+          <ul>
+            <li v-for="(entry, index) in download_list" :key="`${entry.video_id}.${entry.audio_ext}`">
+              <div
+                @click="download_list_index = index" 
+                :class="{'active': index == download_list_index }"
+              >{{ entry.video_id }}.{{ entry.audio_ext }}</div>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <br>
+      <h2>Transcodes</h2>
+      <button @click="refresh_transcodes()">Refresh transcodes</button>
+      <div class="d-flex flex-row">
+        <div>
+        <div>
+          <entry-description :entry="transcode_entry" v-if="transcode_entry !== undefined"/>
+        </div>
+        </div>
+        <div>
+          <ul>
+            <li v-for="(entry, index) in transcode_list" :key="`${entry.video_id}.${entry.audio_ext}`">
+              <div @click="transcode_list_index = index">{{ entry.video_id }}.{{ entry.audio_ext }}</div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { create_app } from "./index.js";
+      create_app().mount("#app");
     </script>
   </body>
 </html>
