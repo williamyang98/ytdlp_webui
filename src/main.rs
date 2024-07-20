@@ -58,6 +58,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .service(routes::delete_transcode)
                 .service(routes::get_downloads)
                 .service(routes::get_transcodes)
+                .service(routes::get_download)
+                .service(routes::get_transcode)
                 .service(routes::get_download_state)
                 .service(routes::get_transcode_state)
             )

@@ -8,6 +8,7 @@ use std::thread;
 use dashmap::DashMap;
 use num_traits::cast::FromPrimitive;
 use serde::Serialize;
+use thiserror::Error;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
 use crate::database::{
     DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable, 
@@ -59,25 +60,30 @@ impl DownloadState {
 pub type DownloadCache = Arc<DashMap<VideoId, WorkerCacheEntry<DownloadState>>>;
 pub const DOWNLOAD_AUDIO_EXT: AudioExtension = AudioExtension::M4A;
 
-#[derive(Debug)]
+#[derive(Debug,Error)]
 pub enum DownloadStartError {
-    DatabaseConnection(r2d2::Error),
-    DatabaseExecute(rusqlite::Error),
+    #[error("Database connection failed: {0:?}")]
+    DatabaseConnection(#[from] r2d2::Error),
+    #[error("Database execute failed: {0:?}")]
+    DatabaseExecute(#[from] rusqlite::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug,Error)]
 pub enum DownloadError {
-    WorkerError(WorkerError),
+    #[error("Worker error: {0}")]
+    WorkerError(#[from] WorkerError),
+    #[error("Usage error: {0}")]
     UsageError(String),
+    #[error("Invalid video id")]
     InvalidVideoId,
+    #[error("Missing output download file: {0}")]
     MissingOutputFile(PathBuf),
+    #[error("Error stored in system log")]
     LoggedFail,
-}
-
-impl From<WorkerError> for DownloadError {
-    fn from(err: WorkerError) -> Self {
-        Self::WorkerError(err)
-    }
+    #[error("Database connection failed: {0:?}")]
+    DatabaseConnection(#[from] r2d2::Error),
+    #[error("Database execute failed: {0:?}")]
+    DatabaseExecute(#[from] rusqlite::Error),
 }
 
 const DB_TABLE: WorkerTable = WorkerTable::YTDLP;
@@ -113,14 +119,14 @@ pub fn try_start_download_worker(
         }
     });
     {
-        let db_conn = db_pool.get().map_err(DownloadStartError::DatabaseConnection)?;
+        let db_conn = db_pool.get()?;
         // check if download finished on disk (cache miss due to reset)
-        let res: rusqlite::Result<(Option<WorkerStatus>, Option<String>)> = select_worker_fields(
+        let res: Option<(Option<WorkerStatus>, Option<String>)> = select_worker_fields(
             &db_conn, &video_id, DOWNLOAD_AUDIO_EXT, DB_TABLE,
             &["status", "audio_path"],
             |row| Ok((WorkerStatus::from_u8(row.get(0)?), row.get(1)?)),
-        );
-        if let Ok((Some(status), Some(audio_path))) = res {
+        )?;
+        if let Some((Some(status), Some(audio_path))) = res {
             let audio_path = PathBuf::from(audio_path);
             if status == WorkerStatus::Finished && audio_path.exists() {
                 let download_state = download_cache.entry(video_id.clone()).or_default();
@@ -131,8 +137,7 @@ pub fn try_start_download_worker(
             }
         }
         // start download worker
-        let _ = insert_worker_entry(&db_conn, &video_id, DOWNLOAD_AUDIO_EXT, DB_TABLE)
-            .map_err(DownloadStartError::DatabaseExecute)?;
+        let _ = insert_worker_entry(&db_conn, &video_id, DOWNLOAD_AUDIO_EXT, DB_TABLE)?;
     }
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching download process: {0}.{1}", video_id.as_str(), DOWNLOAD_AUDIO_EXT.as_str());
@@ -162,7 +167,11 @@ fn enqueue_download_worker(
         let audio_path = audio_path.clone();
         move || {
             let is_downloaded = *is_downloaded.borrow();
-            let worker_status = if is_downloaded { WorkerStatus::Finished } else { WorkerStatus::Failed };
+            let (audio_path, worker_status) = if is_downloaded { 
+                (Some(audio_path.to_str().unwrap().to_string()), WorkerStatus::Finished)
+            } else { 
+                (None, WorkerStatus::Failed)
+            };
             let db_conn = match db_pool.get() {
                 Ok(db_conn) => db_conn,
                 Err(err) => return log::error!("Failed to get database connection: id={0}, err={1:?}", video_id.as_str(), err),
@@ -172,7 +181,7 @@ fn enqueue_download_worker(
             }
             if let Err(err) = update_worker_fields(
                 &db_conn, &video_id, audio_ext, DB_TABLE,
-                &["audio_path"], &[&audio_path.to_str().unwrap()],
+                &["audio_path"], &[&audio_path],
             ) {
                 return log::error!("Failed to update worker audio path: id={0}, err={1:?}", video_id.as_str(), err);
             }
@@ -195,11 +204,11 @@ fn enqueue_download_worker(
     let system_log_file = std::fs::File::create(system_log_path.clone()).map_err(WorkerError::SystemLogCreate)?;
     let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
     {
-        let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
+        let db_conn = db_pool.get()?;
         let _ = update_worker_fields(
             &db_conn, &video_id, audio_ext, DB_TABLE,
             &["system_log_path"], &[&system_log_path.to_str().unwrap()]
-        ).map_err(WorkerError::DatabaseExecute)?;
+        )?;
     }
     // spawn process
     let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
@@ -231,9 +240,8 @@ fn enqueue_download_worker(
         download_state.1.notify_all();
     }
     {
-        let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
-        let _ = update_worker_status(&db_conn, &video_id, audio_ext, WorkerStatus::Running, DB_TABLE)
-            .map_err(WorkerError::DatabaseExecute)?;
+        let db_conn = db_pool.get()?;
+        let _ = update_worker_status(&db_conn, &video_id, audio_ext, WorkerStatus::Running, DB_TABLE)?;
     }
     // scrape stdout and stderr
     let stdout_thread = thread::spawn({
@@ -245,13 +253,13 @@ fn enqueue_download_worker(
         let stdout_log_file = std::fs::File::create(stdout_log_path.clone()).map_err(WorkerError::StdoutLogCreate)?;
         let mut stdout_log_writer = BufWriter::new(stdout_log_file);
         {
-            let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
+            let db_conn = db_pool.get()?;
             let _ = update_worker_fields(
                 &db_conn, &video_id, audio_ext, DB_TABLE,
                 &["stdout_log_path"], &[&stdout_log_path.to_str().unwrap()],
-            ).map_err(WorkerError::DatabaseExecute)?;
+            )?;
         }
-        move || -> Result<(), WorkerError> {
+        move || -> Result<(), DownloadError> {
             let mut line = String::new();
             loop {
                 match stdout_reader.read_line(&mut line) {
@@ -268,12 +276,12 @@ fn enqueue_download_worker(
                         download_state.0.lock().unwrap().update_from_ytdlp(progress);
                     },
                     Some(ytdlp::ParsedStdoutLine::InfoJsonPath(path)) => {
-                        let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
+                        let db_conn = db_pool.get()?;
                         let infojson_path = app_config.root.join(path);
                         let _ = update_worker_fields(
                             &db_conn, &video_id, audio_ext, DB_TABLE,
                             &["infojson_path"], &[&infojson_path.to_str().unwrap()],
-                        ).map_err(WorkerError::DatabaseExecute)?;
+                        )?;
                     },
                 }
                 line.clear();
@@ -289,11 +297,11 @@ fn enqueue_download_worker(
         let stderr_log_file = std::fs::File::create(stderr_log_path.clone()).map_err(WorkerError::StderrLogCreate)?;
         let mut stderr_log_writer = BufWriter::new(stderr_log_file);
         {
-            let db_conn = db_pool.get().map_err(WorkerError::DatabaseConnection)?;
+            let db_conn = db_pool.get()?;
             let _ = update_worker_fields(
                 &db_conn, &video_id, audio_ext, DB_TABLE,
                 &["stderr_log_path"], &[&stderr_log_path.to_str().unwrap()],
-            ).map_err(WorkerError::DatabaseExecute)?;
+            )?;
         }
         move || {
             let mut line = String::new();

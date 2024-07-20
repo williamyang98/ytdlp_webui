@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use thiserror::Error;
 
 #[derive(Clone,Copy,Debug)]
 enum SizeBytes {
@@ -86,12 +87,17 @@ impl Time {
     }
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Error)]
 pub enum TimeParseError {
+    #[error("Failed to parse milliseconds: {0}")]
     InvalidMilliseconds(std::num::ParseFloatError),
+    #[error("Failed to parse seconds: {0}")]
     InvalidSeconds(std::num::ParseIntError),
+    #[error("Failed to parse minutes: {0}")]
     InvalidMinutes(std::num::ParseIntError),
+    #[error("Failed to parse hours: {0}")]
     InvalidHours(std::num::ParseIntError),
+    #[error("Failed to parse days: {0}")]
     InvalidDays(std::num::ParseIntError),
 }
 

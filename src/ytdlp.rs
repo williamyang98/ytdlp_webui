@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use thiserror::Error;
 
 #[derive(Clone,Copy,Debug)]
 enum SizeBytes {
@@ -41,11 +42,15 @@ pub struct Eta {
     pub seconds: u8,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Error)]
 pub enum EtaParseError {
+    #[error("Failed to parse seconds: {0}")]
     InvalidSeconds(std::num::ParseIntError),
+    #[error("Failed to parse minutes: {0}")]
     InvalidMinutes(std::num::ParseIntError),
+    #[error("Failed to parse hours: {0}")]
     InvalidHours(std::num::ParseIntError),
+    #[error("Failed to parse days: {0}")]
     InvalidDays(std::num::ParseIntError),
 }
 

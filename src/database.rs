@@ -1,18 +1,23 @@
+use rusqlite::OptionalExtension;
 use serde::Serialize;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::cast::{FromPrimitive, ToPrimitive};
+use thiserror::Error;
 use crate::generate_bidirectional_binding;
 use crate::util::get_unix_time;
 
 #[derive(Clone,Debug,PartialEq,Eq,Hash,Serialize)]
+#[serde(transparent)]
 pub struct VideoId {
     id: String,
 }
 
-#[derive(Clone,Copy,Debug,Serialize)]
+#[derive(Clone,Copy,Debug,Error,Serialize)]
 pub enum VideoIdError {
+    #[error("Invalid length: expected={expected}, given={given}")]
     InvalidLength { expected: usize, given: usize },
-    InvalidCharacter(char),
+    #[error("Invalid character: index={index}, char={char}")]
+    InvalidCharacter { index: usize, char: char },
 }
 
 impl VideoId {
@@ -21,9 +26,9 @@ impl VideoId {
         if id.len() != VALID_YOUTUBE_ID_LENGTH {
             return Err(VideoIdError::InvalidLength { expected: VALID_YOUTUBE_ID_LENGTH, given: id.len() });
         }
-        let invalid_char = id.chars().find(|c| !matches!(c, 'A'..='Z'|'a'..='z'|'0'..='9'|'-'|'_'));
-        if let Some(c) = invalid_char {
-            return Err(VideoIdError::InvalidCharacter(c));
+        let invalid_char = id.chars().enumerate().find(|(_,c)| !matches!(c, 'A'..='Z'|'a'..='z'|'0'..='9'|'-'|'_'));
+        if let Some((index, c)) = invalid_char {
+            return Err(VideoIdError::InvalidCharacter { index, char: c });
         }
         Ok(Self { id: id.to_string() })
     }
@@ -34,6 +39,7 @@ impl VideoId {
 }
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Hash,Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AudioExtension {
     M4A,
     AAC,
@@ -56,6 +62,7 @@ impl AudioExtension {
 }
 
 #[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive)]
+#[serde(rename_all = "lowercase")]
 pub enum WorkerStatus {
     #[default]
     None = 0,
@@ -220,7 +227,7 @@ pub fn select_worker_status(
 pub fn select_worker_fields<T, F>(
     db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension, table: WorkerTable, 
     fields: &[&str], transform: F,
-) -> Result<T, rusqlite::Error> 
+) -> Result<Option<T>, rusqlite::Error> 
 where F: FnOnce(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
 {
     use std::fmt::Write;
@@ -235,7 +242,7 @@ where F: FnOnce(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
     }
     write!(&mut query, " FROM {table} WHERE video_id=?1 AND audio_ext=?2").expect("Query builder shouldn't fail");
     let mut select_query = db_conn.prepare(query.as_str())?;
-    select_query.query_row([video_id.as_str(), audio_ext.as_str()], transform)
+    select_query.query_row([video_id.as_str(), audio_ext.as_str()], transform).optional()
 }
 
 pub fn delete_worker_entry(
@@ -248,46 +255,85 @@ pub fn delete_worker_entry(
     )
 }
 
+fn map_ytdlp_row_to_entry(row: &rusqlite::Row) -> Result<YtdlpRow, rusqlite::Error> {
+    let video_id: Option<String> = row.get(0)?;
+    let video_id = video_id.expect("video_id is a primary key");
+    let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
+
+    let audio_ext: Option<String> = row.get(1)?;
+    let audio_ext = audio_ext.expect("audio_ext is a primary key");
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
+
+    let status: Option<u8> = row.get(2)?;
+    let status = status.expect("status should be present");
+    let status = WorkerStatus::from_u8(status).expect("status should be valid");
+
+    let unix_time: Option<u64> = row.get(3)?;
+    let unix_time = unix_time.unwrap_or(0);
+
+    Ok(YtdlpRow {
+        video_id,
+        audio_ext,
+        status,
+        unix_time,
+        infojson_path: row.get(4)?,
+        stdout_log_path: row.get(5)?,
+        stderr_log_path: row.get(6)?,
+        system_log_path: row.get(7)?,
+        audio_path: row.get(8)?,
+    })
+}
+
 pub fn select_ytdlp_entries(db_conn: &DatabaseConnection) -> Result<Vec<YtdlpRow>, rusqlite::Error> {
     let table: &'static str = WorkerTable::YTDLP.into();
     let mut stmt = db_conn.prepare(format!(
         "SELECT video_id, audio_ext, status, unix_time, infojson_path,\
          stdout_log_path, stderr_log_path, system_log_path, audio_path FROM {table}").as_str())?;
-
-    let row_iter = stmt.query_map([], |row| {
-        let video_id: Option<String> = row.get(0)?;
-        let video_id = video_id.expect("video_id is a primary key");
-        let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
-
-        let audio_ext: Option<String> = row.get(1)?;
-        let audio_ext = audio_ext.expect("audio_ext is a primary key");
-        let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
-
-        let status: Option<u8> = row.get(2)?;
-        let status = status.expect("status should be present");
-        let status = WorkerStatus::from_u8(status).expect("status should be valid");
-
-        let unix_time: Option<u64> = row.get(3)?;
-        let unix_time = unix_time.unwrap_or(0);
-
-        Ok(YtdlpRow {
-            video_id,
-            audio_ext,
-            status,
-            unix_time,
-            infojson_path: row.get(4)?,
-            stdout_log_path: row.get(5)?,
-            stderr_log_path: row.get(6)?,
-            system_log_path: row.get(7)?,
-            audio_path: row.get(8)?,
-        })
-    })?;
-
+    let row_iter = stmt.query_map([], map_ytdlp_row_to_entry)?;
     let mut entries = Vec::<YtdlpRow>::new();
     for row in row_iter {
         entries.push(row?);
     }
     Ok(entries)
+}
+
+pub fn select_ytdlp_entry(
+    db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension,
+) -> Result<Option<YtdlpRow>, rusqlite::Error> {
+    let table: &'static str = WorkerTable::YTDLP.into();
+    let mut stmt = db_conn.prepare(format!(
+        "SELECT video_id, audio_ext, status, unix_time,\
+         stdout_log_path, stderr_log_path, system_log_path, audio_path \
+         FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str())?;
+    stmt.query_row([video_id.as_str(), audio_ext.as_str()], map_ytdlp_row_to_entry).optional()
+}
+
+fn map_ffmpeg_row_to_entry(row: &rusqlite::Row) -> Result<FfmpegRow, rusqlite::Error> {
+    let video_id: Option<String> = row.get(0)?;
+    let video_id = video_id.expect("video_id is a primary key");
+    let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
+
+    let audio_ext: Option<String> = row.get(1)?;
+    let audio_ext = audio_ext.expect("audio_ext is a primary key");
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
+
+    let status: Option<u8> = row.get(2)?;
+    let status = status.expect("status should be present");
+    let status = WorkerStatus::from_u8(status).expect("status should be valid");
+
+    let unix_time: Option<u64> = row.get(3)?;
+    let unix_time = unix_time.unwrap_or(0);
+
+    Ok(FfmpegRow {
+        video_id,
+        audio_ext,
+        status,
+        unix_time,
+        stdout_log_path: row.get(4)?,
+        stderr_log_path: row.get(5)?,
+        system_log_path: row.get(6)?,
+        audio_path: row.get(7)?,
+    })
 }
 
 pub fn select_ffmpeg_entries(db_conn: &DatabaseConnection) -> Result<Vec<FfmpegRow>, rusqlite::Error> {
@@ -296,37 +342,21 @@ pub fn select_ffmpeg_entries(db_conn: &DatabaseConnection) -> Result<Vec<FfmpegR
         "SELECT video_id, audio_ext, status, unix_time,\
          stdout_log_path, stderr_log_path, system_log_path, audio_path FROM {table}").as_str())?;
 
-    let row_iter = stmt.query_map([], |row| {
-        let video_id: Option<String> = row.get(0)?;
-        let video_id = video_id.expect("video_id is a primary key");
-        let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
-
-        let audio_ext: Option<String> = row.get(1)?;
-        let audio_ext = audio_ext.expect("audio_ext is a primary key");
-        let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
-
-        let status: Option<u8> = row.get(2)?;
-        let status = status.expect("status should be present");
-        let status = WorkerStatus::from_u8(status).expect("status should be valid");
-
-        let unix_time: Option<u64> = row.get(3)?;
-        let unix_time = unix_time.unwrap_or(0);
-
-        Ok(FfmpegRow {
-            video_id,
-            audio_ext,
-            status,
-            unix_time,
-            stdout_log_path: row.get(4)?,
-            stderr_log_path: row.get(5)?,
-            system_log_path: row.get(6)?,
-            audio_path: row.get(7)?,
-        })
-    })?;
-
+    let row_iter = stmt.query_map([], map_ffmpeg_row_to_entry)?;
     let mut entries = Vec::<FfmpegRow>::new();
     for row in row_iter {
         entries.push(row?);
     }
     Ok(entries)
+}
+
+pub fn select_ffmpeg_entry(
+    db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension,
+) -> Result<Option<FfmpegRow>, rusqlite::Error> {
+    let table: &'static str = WorkerTable::FFMPEG.into();
+    let mut stmt = db_conn.prepare(format!(
+        "SELECT video_id, audio_ext, status, unix_time,\
+         stdout_log_path, stderr_log_path, system_log_path, audio_path \
+         FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str())?;
+    stmt.query_row([video_id.as_str(), audio_ext.as_str()], map_ffmpeg_row_to_entry).optional()
 }

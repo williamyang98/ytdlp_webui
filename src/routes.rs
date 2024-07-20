@@ -6,8 +6,7 @@ use serde::Serialize;
 use derive_more::Display;
 use crate::database::{
     DatabasePool, VideoId, VideoIdError, AudioExtension, WorkerStatus, WorkerTable,
-    delete_worker_entry,
-    select_ytdlp_entries, select_ffmpeg_entries,
+    delete_worker_entry, select_ytdlp_entries, select_ffmpeg_entries, select_ytdlp_entry, select_ffmpeg_entry,
 };
 use crate::worker_download::{try_start_download_worker, DownloadCache, DOWNLOAD_AUDIO_EXT};
 use crate::worker_transcode::{try_start_transcode_worker, TranscodeCache, TranscodeKey};
@@ -25,6 +24,27 @@ impl ApiError {
     fn new(error: String, status_code: StatusCode) -> Self {
         Self { error, status_code }
     }
+
+    fn invalid_video_id(id: String, err: VideoIdError) -> Self {
+        Self {
+            error: format!("invalid video id {id}: {err:?}"),
+            status_code: StatusCode::BAD_REQUEST,
+        }
+    }
+
+    fn invalid_audio_extension(ext: String) -> Self {
+        Self {
+            error: format!("invalid audio extension: {ext}"),
+            status_code: StatusCode::BAD_REQUEST,
+        }
+    }
+
+    fn internal_server(err: impl std::fmt::Debug) -> Self {
+        Self {
+            error: format!("internal server error: {err:?}"),
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 impl actix_web::ResponseError for ApiError {
@@ -39,27 +59,6 @@ impl actix_web::ResponseError for ApiError {
     }
 }
 
-fn error_invalid_video_id(id: String, err: VideoIdError) -> ApiError {
-    ApiError {
-        error: format!("invalid video id {id}: {err:?}"),
-        status_code: StatusCode::BAD_REQUEST,
-    }
-}
-
-fn error_invalid_audio_extension(ext: String) -> ApiError {
-    ApiError {
-        error: format!("invalid audio extension: {ext}"),
-        status_code: StatusCode::BAD_REQUEST,
-    }
-}
-
-fn error_internal_server(err: impl std::fmt::Debug) -> ApiError {
-    ApiError {
-        error: format!("internal server error: {err:?}"),
-        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
-
 #[derive(Debug,Default,Clone,Serialize)]
 struct RequestTranscodeResponse {
     download_status: WorkerStatus,
@@ -71,8 +70,8 @@ struct RequestTranscodeResponse {
 #[allow(clippy::field_reassign_with_default)]
 pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| error_invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| error_invalid_audio_extension(audio_ext))?;
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
     let transcode_cache = req.app_data::<TranscodeCache>().unwrap().clone();
@@ -84,7 +83,7 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
     response.download_status = try_start_download_worker(
         video_id.clone(),
         download_cache.clone(), app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
-    ).map_err(error_internal_server)?;
+    ).map_err(ApiError::internal_server)?;
     if audio_ext == DOWNLOAD_AUDIO_EXT {
         // skip transcode
         response.is_skip_transcode = true;
@@ -93,24 +92,24 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
         response.transcode_status = try_start_transcode_worker(
             transcode_key.clone(),
             download_cache, transcode_cache, app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
-        ).map_err(error_internal_server)?;
+        ).map_err(ApiError::internal_server)?;
     }
     Ok(HttpResponse::Ok().json(response))
 }
 
-#[derive(Debug,Default,Serialize)]
+#[derive(Debug,Serialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "lowercase")]
 enum DeleteTranscodeResponse {
-    #[default]
-    None,
     Busy,
-    Success(usize),
+    Success { total_deleted: usize },
 }
 
 #[actix_web::get("/delete_transcode/{video_id}/{extension}")]
 pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| error_invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| error_invalid_audio_extension(audio_ext))?;
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
     let total_deleted = if audio_ext == DOWNLOAD_AUDIO_EXT {
         let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
@@ -121,7 +120,7 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
         }
         let db_conn = db_pool.get().map_err(error::ErrorInternalServerError)?;
         let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::YTDLP)
-            .map_err(error::ErrorInternalServerError)?;
+            .map_err(ApiError::internal_server)?;
         state.worker_status = WorkerStatus::None;
         download_state.1.notify_all();
         total_deleted
@@ -135,39 +134,57 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
         }
         let db_conn = db_pool.get().map_err(error::ErrorInternalServerError)?;
         let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::FFMPEG)
-            .map_err(error::ErrorInternalServerError)?;
+            .map_err(ApiError::internal_server)?;
         state.worker_status = WorkerStatus::None;
         transcode_state.1.notify_all();
         total_deleted
     };
-    if total_deleted > 0 {
-        Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::Success(total_deleted)))
-    } else {
-        Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::None))
-    }
+    Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::Success { total_deleted }))
 }
 
 #[actix_web::get("/get_downloads")]
 pub async fn get_downloads(req: HttpRequest) -> actix_web::Result<HttpResponse> {
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
-    let db_conn = db_pool.get().map_err(error_internal_server)?;
-    let entries = select_ytdlp_entries(&db_conn).map_err(error_internal_server)?;
+    let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
+    let entries = select_ytdlp_entries(&db_conn).map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(entries))
 }
 
 #[actix_web::get("/get_transcodes")]
 pub async fn get_transcodes(req: HttpRequest) -> actix_web::Result<HttpResponse> {
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
-    let db_conn = db_pool.get().map_err(error_internal_server)?;
-    let entries = select_ffmpeg_entries(&db_conn).map_err(error_internal_server)?;
+    let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
+    let entries = select_ffmpeg_entries(&db_conn).map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(entries))
+}
+
+#[actix_web::get("/get_download/{video_id}/{extension}")]
+pub async fn get_download(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
+    let (video_id, audio_ext) = path.into_inner();
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
+    let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
+    let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ytdlp_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    Ok(HttpResponse::Ok().json(entry))
+}
+
+#[actix_web::get("/get_transcode/{video_id}/{extension}")]
+pub async fn get_transcode(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
+    let (video_id, audio_ext) = path.into_inner();
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
+    let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
+    let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    Ok(HttpResponse::Ok().json(entry))
 }
 
 #[actix_web::get("/get_download_state/{video_id}/{extension}")]
 pub async fn get_download_state(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| error_invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| error_invalid_audio_extension(audio_ext))?;
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     if audio_ext != DOWNLOAD_AUDIO_EXT {
         return Err(ApiError::new(
             format!("Downloads can only have the '{0}' extension, but got '{1}'", DOWNLOAD_AUDIO_EXT.as_str(), audio_ext.as_str()),
@@ -176,7 +193,10 @@ pub async fn get_download_state(req: HttpRequest, path: web::Path<(String, Strin
     }
     let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
     if let Some(download_state) = download_cache.get(&video_id) {
-        return Ok(HttpResponse::Ok().json(*download_state.0.lock().unwrap()));
+        let download_state = *download_state.0.lock().unwrap();
+        if download_state.worker_status != WorkerStatus::None {
+            return Ok(HttpResponse::Ok().json(download_state));
+        }
     }
     Ok(HttpResponse::NotFound().finish())
 }
@@ -184,8 +204,8 @@ pub async fn get_download_state(req: HttpRequest, path: web::Path<(String, Strin
 #[actix_web::get("/get_transcode_state/{video_id}/{extension}")]
 pub async fn get_transcode_state(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| error_invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| error_invalid_audio_extension(audio_ext))?;
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     if audio_ext == DOWNLOAD_AUDIO_EXT {
         return Err(ApiError::new(
             format!("Transcodes cannot have the '{0}' extension", DOWNLOAD_AUDIO_EXT.as_str()),
@@ -195,7 +215,10 @@ pub async fn get_transcode_state(req: HttpRequest, path: web::Path<(String, Stri
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let transcode_cache = req.app_data::<TranscodeCache>().unwrap().clone();
     if let Some(transcode_state) = transcode_cache.get(&transcode_key) {
-        return Ok(HttpResponse::Ok().json(*transcode_state.0.lock().unwrap()));
+        let transcode_state = *transcode_state.0.lock().unwrap();
+        if transcode_state.worker_status != WorkerStatus::None {
+            return Ok(HttpResponse::Ok().json(transcode_state));
+        }
     }
     Ok(HttpResponse::NotFound().finish())
 }
