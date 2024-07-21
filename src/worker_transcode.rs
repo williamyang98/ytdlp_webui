@@ -199,6 +199,9 @@ pub fn try_start_transcode_worker(
             key.clone(), download_cache.clone(), transcode_cache.clone(), 
             app_config.clone(), db_pool.clone(), system_log_writer.clone(),
         );
+        if let Err(ref err) = res {
+            let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
+        }
         // update database
         let (audio_path, worker_status, worker_error) = match res {
             Ok(path) => (Some(path), WorkerStatus::Finished, None),

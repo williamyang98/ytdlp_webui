@@ -170,6 +170,9 @@ pub fn try_start_download_worker(
         let res = enqueue_download_worker(
             video_id.clone(), download_cache.clone(), app_config.clone(), db_pool.clone(), system_log_writer.clone(),
         );
+        if let Err(ref err) = res {
+            let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
+        }
         // update database
         let (audio_path, worker_status, worker_error) = match res {
             Ok(path) => (Some(path), WorkerStatus::Finished, None),
