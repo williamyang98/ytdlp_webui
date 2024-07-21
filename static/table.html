@@ -1,0 +1,55 @@
+<table class="sortable-table">
+  <thead>
+    <tr>
+      <td v-for="column in columns" :key="column">
+        <div class="d-flex d-row">
+          <div class="flex-grow-1">{{ column.header }}</div>
+          <div 
+            v-if="column.is_sort"
+            @click="set_sort_key(column)"
+            class="sort-button"
+            :class="{ 'inactive': sort_key === null || sort_key.name != column.name }"
+          >
+            <template v-if="this.sort_values[column.name].is_ascending">↑</template>
+            <template v-else>↓</template>
+          </div>
+        </div>
+      </td>
+      <td v-if="actions !== undefined">Actions</td>
+    </tr>
+  </thead>
+  <tbody>
+    <template v-if="filtered_data.length > 0">
+      <tr
+        v-for="row in filtered_data"
+        :key="row[0]"
+        @click="select_row(row[0])" 
+        class="table-row"
+        :class="{ 'selected': row[0] == selected_row }"
+      >
+        <td v-for="column in columns">
+          <template v-if="column.type == ColumnType.LINK">
+            <a v-if="row[1][column.name] !== null" :href="row[1][column.name]">Link</a>
+          </template>
+          <div v-else>{{ column.transform(row[1][column.name]) }}</div>
+        </td>
+        <td v-if="actions !== undefined">
+          <div class="d-flex flex-row">
+            <div 
+              v-for="action in actions" :key="action.name" 
+              @click.stop="on_row_action(action.name, row[0])"
+              class="action-button"
+            >{{ action.icon }}</div>
+          </div>
+        </td>
+      </tr>
+    </template>
+    <template v-else>
+      <tr>
+        <td :colspan="columns.length + ((actions.length > 0) ? 1 : 0)">
+          <div class="text-center">No entries</div>
+        </td>
+      </tr>
+    </template>
+  </tbody>
+</table>

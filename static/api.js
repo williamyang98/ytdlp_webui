@@ -22,6 +22,11 @@ export class Api {
     return await response.json();
   }
 
+  static delete_download = async (id, format) => {
+    let response = await fetch(`${API_URL}/delete_download/${id}/${format}`);
+    return await response.json();
+  }
+
   static get_download_state = async (id, format) => {
     let response = await fetch(`${API_URL}/get_download_state/${id}/${format}`);
     return await response.json();

@@ -2,10 +2,10 @@
   <head>
     <title>Youtube downloader webui</title>
     <link rel="stylesheet" href="./index.css">
+    <link rel="stylesheet" href="./table.css">
   </head>
   <body>
-    <form>
-    </form>
+    <template id="sortable-table" href="./table.html"></template>
     <template id="entry-description">
       <table>
         <tr><td>Filename</td><td>{{ entry.video_id }}.{{ entry.audio_ext }}</td></tr>
@@ -40,7 +40,6 @@
           <option value="aac">aac</option>
         </select>
         <button @click="request_transcode()">Request</button>
-        <button @click="delete_transcode()">Delete</button>
         <button @click="get_transcode_progress()">Get progress</button>
         <br>
         <ul>
@@ -53,42 +52,27 @@
       <br>
       <h2>Downloads</h2>
       <button @click="refresh_downloads()">Refresh downloads</button>
-      <div class="d-flex flex-row">
-        <div>
-          <entry-description :entry="download_entry" v-if="download_entry !== undefined"/>
-        </div>
-        <div>
-          <ul>
-            <li v-for="(entry, index) in download_list" :key="`${entry.video_id}.${entry.audio_ext}`">
-              <div
-                @click="download_list_index = index" 
-                :class="{'active': index == download_list_index }"
-              >{{ entry.video_id }}.{{ entry.audio_ext }}</div>
-            </li>
-          </ul>
-        </div>
-      </div>
+      <sortable-table 
+        :columns="download_list_columns" :data="download_list" :init-sort-column="'unix_time'"
+        :actions="[{ name: 'delete', icon: '🗑'}]"
+        @row-select="(index) => download_list_index = index"
+        @row-action="(action) => on_download_table_action(action)"
+      ></sortable-table>
+      <entry-description :entry="download_entry" v-if="download_entry !== undefined"></entry-description>
       <br>
       <h2>Transcodes</h2>
       <button @click="refresh_transcodes()">Refresh transcodes</button>
-      <div class="d-flex flex-row">
-        <div>
-        <div>
-          <entry-description :entry="transcode_entry" v-if="transcode_entry !== undefined"/>
-        </div>
-        </div>
-        <div>
-          <ul>
-            <li v-for="(entry, index) in transcode_list" :key="`${entry.video_id}.${entry.audio_ext}`">
-              <div @click="transcode_list_index = index">{{ entry.video_id }}.{{ entry.audio_ext }}</div>
-            </li>
-          </ul>
-        </div>
-      </div>
+      <sortable-table
+        :columns="transcode_list_columns" :data="transcode_list" :init-sort-column="'unix_time'"
+        :actions="[{ name: 'delete', icon: '🗑'}]"
+        @row-select="(index) => transcode_list_index = index"
+        @row-action="(action) => on_transcode_table_action(action)"
+      ></sortable-table>
+      <entry-description :entry="transcode_entry" v-if="transcode_entry !== undefined"></entry-description>
     </div>
-
     <script type="module">
-      import { create_app } from "./index.js";
+      import { create_app, load_html_fragments } from "./index.js";
+      await load_html_fragments();
       create_app().mount("#app");
     </script>
   </body>
