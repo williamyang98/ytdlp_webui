@@ -101,10 +101,54 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
 #[derive(Debug,Serialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "lowercase")]
-enum DeleteTranscodeResponse {
+enum DeleteResponse {
     Busy,
     Success { path: Option<String> },
     FailedFileDelete { path: String, reason: String },
+}
+
+#[actix_web::get("/delete_download/{video_id}/{extension}")]
+pub async fn delete_download(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
+    let (video_id, audio_ext) = path.into_inner();
+    let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
+    if audio_ext != DOWNLOAD_AUDIO_EXT {
+        return Err(ApiError::invalid_audio_extension(audio_ext.as_str().to_string()).into());
+    }
+    let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
+    let download_state = download_cache.entry(video_id.clone()).or_default();
+    let mut state = download_state.0.lock().unwrap();
+    if state.worker_status.is_busy() {
+        return Ok(HttpResponse::Ok().json(DeleteResponse::Busy));
+    }
+    let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
+    let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
+    let audio_path: Option<Option<String>> = select_worker_fields(
+        &db_conn, &video_id, audio_ext, WorkerTable::YTDLP,
+        &["audio_path"], |row| Ok(row.get(0)?),
+    ).map_err(ApiError::internal_server)?;
+    let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::YTDLP)
+        .map_err(ApiError::internal_server)?;
+    state.worker_status = WorkerStatus::None;
+    download_state.1.notify_all();
+    drop(state);
+    drop(download_state);
+    drop(db_conn);
+
+    if total_deleted == 0 {
+        return Ok(HttpResponse::NotFound().finish());
+    }
+    let audio_path = audio_path.flatten();
+    let Some(audio_path) = audio_path else {
+        return Ok(HttpResponse::Ok().json(DeleteResponse::Success { path: None }));
+    };
+    if let Err(err) = std::fs::remove_file(std::path::PathBuf::from(audio_path.clone())) {
+        return Ok(HttpResponse::Ok().json(DeleteResponse::FailedFileDelete { 
+            path: audio_path,
+            reason: err.to_string(),
+        }));
+    }
+    Ok(HttpResponse::Ok().json(DeleteResponse::Success { path: Some(audio_path) }))
 }
 
 #[actix_web::get("/delete_transcode/{video_id}/{extension}")]
@@ -112,56 +156,41 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
     let (video_id, audio_ext) = path.into_inner();
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
+    let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
+    let transcode_cache = req.app_data::<TranscodeCache>().unwrap().clone();
+    let transcode_state = transcode_cache.entry(transcode_key.clone()).or_default();
+    let mut state = transcode_state.0.lock().unwrap();
+    if state.worker_status.is_busy() {
+        return Ok(HttpResponse::Ok().json(DeleteResponse::Busy));
+    }
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
-    let (total_deleted, audio_path) = if audio_ext == DOWNLOAD_AUDIO_EXT {
-        let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
-        let download_state = download_cache.entry(video_id.clone()).or_default();
-        let mut state = download_state.0.lock().unwrap();
-        if state.worker_status.is_busy() {
-            return Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::Busy));
-        }
-        let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
-        let audio_path: Option<String> = select_worker_fields(
-            &db_conn, &video_id, audio_ext, WorkerTable::YTDLP,
-            &["audio_path"], |row| Ok(row.get(0)?),
-        ).map_err(ApiError::internal_server)?;
-        let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::YTDLP)
-            .map_err(ApiError::internal_server)?;
-        state.worker_status = WorkerStatus::None;
-        download_state.1.notify_all();
-        (total_deleted, audio_path)
-    } else {
-        let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
-        let transcode_cache = req.app_data::<TranscodeCache>().unwrap().clone();
-        let transcode_state = transcode_cache.entry(transcode_key.clone()).or_default();
-        let mut state = transcode_state.0.lock().unwrap();
-        if state.worker_status.is_busy() {
-            return Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::Busy));
-        }
-        let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
-        let audio_path: Option<String> = select_worker_fields(
-            &db_conn, &video_id, audio_ext, WorkerTable::FFMPEG,
-            &["audio_path"], |row| Ok(row.get(0)?),
-        ).map_err(ApiError::internal_server)?;
-        let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::FFMPEG)
-            .map_err(ApiError::internal_server)?;
-        state.worker_status = WorkerStatus::None;
-        transcode_state.1.notify_all();
-        (total_deleted, audio_path)
-    };
+    let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
+    let audio_path: Option<Option<String>> = select_worker_fields(
+        &db_conn, &video_id, audio_ext, WorkerTable::FFMPEG,
+        &["audio_path"], |row| Ok(row.get(0)?),
+    ).map_err(ApiError::internal_server)?;
+    let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::FFMPEG)
+        .map_err(ApiError::internal_server)?;
+    state.worker_status = WorkerStatus::None;
+    transcode_state.1.notify_all();
+    drop(state);
+    drop(transcode_state);
+    drop(db_conn);
+
     if total_deleted == 0 {
         return Ok(HttpResponse::NotFound().finish());
     }
+    let audio_path = audio_path.flatten();
     let Some(audio_path) = audio_path else {
-        return Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::Success { path: None }));
+        return Ok(HttpResponse::Ok().json(DeleteResponse::Success { path: None }));
     };
     if let Err(err) = std::fs::remove_file(std::path::PathBuf::from(audio_path.clone())) {
-        return Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::FailedFileDelete { 
+        return Ok(HttpResponse::Ok().json(DeleteResponse::FailedFileDelete { 
             path: audio_path,
             reason: err.to_string(),
         }));
     }
-    Ok(HttpResponse::Ok().json(DeleteTranscodeResponse::Success { path: Some(audio_path) }))
+    Ok(HttpResponse::Ok().json(DeleteResponse::Success { path: Some(audio_path) }))
 }
 
 #[actix_web::get("/get_downloads")]

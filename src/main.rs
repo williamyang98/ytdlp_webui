@@ -56,6 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .service(web::scope(API_PREFIX)
                 .service(routes::request_transcode)
                 .service(routes::delete_transcode)
+                .service(routes::delete_download)
                 .service(routes::get_downloads)
                 .service(routes::get_transcodes)
                 .service(routes::get_download)
