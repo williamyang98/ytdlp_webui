@@ -20,13 +20,13 @@ use crate::ytdlp;
 #[derive(Clone,Debug,Serialize)]
 pub struct DownloadState {
     pub worker_status: WorkerStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fail_reason: Option<String>,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
-    pub downloaded_bytes: usize,
-    pub size_bytes: usize,
-    pub speed_bytes: usize,
+    pub downloaded_bytes: Option<usize>,
+    pub size_bytes: Option<usize>,
+    pub speed_bytes: Option<usize>,
+    pub eta: Option<ytdlp::Eta>,
 }
 
 impl Default for DownloadState {
@@ -37,26 +37,32 @@ impl Default for DownloadState {
             fail_reason: None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
-            downloaded_bytes: 0,
-            size_bytes: 0,
-            speed_bytes: 0,
+            downloaded_bytes: None,
+            size_bytes: None,
+            speed_bytes: None,
+            eta: None,
         }
+    }
+}
+
+fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
+    if src.is_some() {
+        *dst = src;
     }
 }
 
 impl DownloadState {
     pub fn update_from_ytdlp(&mut self, progress: ytdlp::DownloadProgress) {
         self.end_time_unix = get_unix_time();
+        update_field(&mut self.size_bytes, progress.size_bytes);
         if let Some(size_bytes) = progress.size_bytes {
-            self.size_bytes = size_bytes;
             if let Some(percentage) = progress.percentage {
                 let total_bytes = (size_bytes as f32 * percentage * 0.01) as usize;
-                self.downloaded_bytes = total_bytes;
+                self.downloaded_bytes = Some(total_bytes);
             }
         }
-        if let Some(speed_bytes) = progress.speed_bytes {
-            self.speed_bytes = speed_bytes;
-        }
+        update_field(&mut self.speed_bytes, progress.speed_bytes);
+        update_field(&mut self.eta, progress.eta);
     }
 }
 

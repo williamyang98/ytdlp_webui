@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 use thiserror::Error;
+use serde::Serialize;
 
 #[derive(Clone,Copy,Debug)]
 enum SizeBytes {
@@ -34,7 +35,7 @@ impl SizeBytes {
     }
 }
 
-#[derive(Clone,Copy,Debug,Default)]
+#[derive(Clone,Copy,Debug,Default,Serialize)]
 pub struct Eta {
     pub days: u8,
     pub hours: u8,

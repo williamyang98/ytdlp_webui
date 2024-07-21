@@ -33,14 +33,16 @@ impl TranscodeKey {
 #[derive(Debug,Clone,Serialize)]
 pub struct TranscodeState {
     pub worker_status: WorkerStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fail_reason: Option<String>,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
-    pub time_elapsed_microseconds: u64,
-    pub size_bytes: usize,
-    pub speed_bits: usize,
-    pub speed_factor: u32,
+    pub source_duration_milliseconds: Option<u64>,
+    pub source_start_time_milliseconds: Option<u64>,
+    pub source_speed_bits: Option<usize>,
+    pub transcode_duration_milliseconds: Option<u64>,
+    pub transcode_size_bytes: Option<usize>,
+    pub transcode_speed_bits: Option<usize>,
+    pub transcode_speed_factor: Option<u32>,
 }
 
 impl Default for TranscodeState {
@@ -51,29 +53,37 @@ impl Default for TranscodeState {
             fail_reason: None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
-            time_elapsed_microseconds: 0,
-            size_bytes: 0,
-            speed_bits: 0,
-            speed_factor: 0,
+            source_duration_milliseconds: None,
+            source_start_time_milliseconds: None,
+            source_speed_bits: None,
+            transcode_duration_milliseconds: None,
+            transcode_size_bytes: None,
+            transcode_speed_bits: None,
+            transcode_speed_factor: None,
         }
     }
 }
 
+fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
+    if src.is_some() {
+        *dst = src;
+    }
+}
+
 impl TranscodeState {
-    pub fn update_from_ffmpeg(&mut self, progress: ffmpeg::TranscodeProgress) {
+    pub fn update_from_progress(&mut self, progress: ffmpeg::TranscodeProgress) {
         self.end_time_unix = get_unix_time();
-        if let Some(size_bytes) = progress.size_bytes {
-            self.size_bytes = size_bytes;
-        }
-        if let Some(time_elapsed) = progress.time_elapsed {
-            self.time_elapsed_microseconds = time_elapsed.to_microseconds();
-        }
-        if let Some(speed_bits) = progress.speed_bits {
-            self.speed_bits = speed_bits;
-        }
-        if let Some(speed_factor) = progress.speed_factor {
-            self.speed_factor = speed_factor;
-        }
+        update_field(&mut self.transcode_size_bytes, progress.size_bytes);
+        update_field(&mut self.transcode_duration_milliseconds , progress.total_time_transcoded.map(|t| t.to_milliseconds()));
+        update_field(&mut self.transcode_speed_bits, progress.speed_bits);
+        update_field(&mut self.transcode_speed_factor, progress.speed_factor);
+    }
+
+    pub fn update_from_source_info(&mut self, info: ffmpeg::TranscodeSourceInfo) {
+        self.end_time_unix = get_unix_time();
+        update_field(&mut self.source_duration_milliseconds, info.duration.map(|t| t.to_milliseconds()));
+        update_field(&mut self.source_start_time_milliseconds, info.start_time.map(|t| t.to_milliseconds()));
+        update_field(&mut self.source_speed_bits, info.speed_bits);
     }
 }
 
@@ -337,10 +347,15 @@ fn enqueue_transcode_worker(
                 let _ = stderr_log_writer.write(line.as_bytes()).map_err(WorkerError::StderrWriteFail)?;
                 match ffmpeg::parse_stderr_line(line.as_str()) {
                     None => (),
+                    Some(ffmpeg::ParsedStderrLine::TranscodeSourceInfo(info)) => {
+                        log::debug!("[transcode] id={0} info={info:?}", key.as_str());
+                        let transcode_state = transcode_cache.entry(key.clone()).or_default();
+                        transcode_state.0.lock().unwrap().update_from_source_info(info);
+                    },
                     Some(ffmpeg::ParsedStderrLine::TranscodeProgress(progress)) => {
                         log::debug!("[transcode] id={0} progress={progress:?}", key.as_str());
                         let transcode_state = transcode_cache.entry(key.clone()).or_default();
-                        transcode_state.0.lock().unwrap().update_from_ffmpeg(progress);
+                        transcode_state.0.lock().unwrap().update_from_progress(progress);
                     },
                 }
                 line.clear();
