@@ -142,7 +142,6 @@ button[disabled] {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  color: #fff;
   text-align: center;
   transition: width .6s ease;
   font-weight: bold;
@@ -170,22 +169,27 @@ button[disabled] {
 /* Common colors */
 .bg-primary {
   background-color: #007bff !important;
+  color: #fff;
 }
 
 .bg-success {
-  background-color: #28a745 !important
+  background-color: #28a745 !important;
+  color: #fff;
 }
 
 .bg-warning {
   background-color: #ffc107 !important;
+  color: #fff;
 }
 
 .bg-danger {
   background-color: #dc3545 !important;
+  color: #fff;
 }
 
 .text-danger {
   color: #dc3545 !important;
+  color: #fff;
 }
 
 /* Common */

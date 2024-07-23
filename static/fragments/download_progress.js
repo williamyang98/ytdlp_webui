@@ -8,7 +8,7 @@ import {
 const status_to_colour_class = (status) => {
   switch (status) {
     case WorkerStatus.None: return "";
-    case WorkerStatus.Queued: return "bg-primary";
+    case WorkerStatus.Queued: return "";
     case WorkerStatus.Running: return "bg-primary";
     case WorkerStatus.Failed: return "bg-danger";
     case WorkerStatus.Finished: return "bg-success";
