@@ -29,9 +29,13 @@ struct Args {
     total_worker_threads: usize,
     /// ffmpeg binary for transcoding between formats
     #[arg(long)]
+    #[cfg_attr(windows, arg(default_value = Some("./bin/ffmpeg.exe")))]
+    #[cfg_attr(unix, arg(default_value = Some("ffmpeg")))]
     ffmpeg_binary_path: Option<String>,
     /// yt-dlp binary for downloading from Youtube
     #[arg(long)]
+    #[cfg_attr(windows, arg(default_value = Some("./bin/yt-dlp.exe")))]
+    #[cfg_attr(unix, arg(default_value = Some("./bin/yt-dlp")))]
     ytdlp_binary_path: Option<String>,
 }
 

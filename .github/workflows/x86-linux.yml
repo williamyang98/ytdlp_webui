@@ -1,0 +1,54 @@
+name: x86-linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master", "main", "dev" ]
+
+env:
+  PACKAGE_DIR: package
+
+jobs:
+  skip_check:
+    continue-on-error: false
+    runs-on: ubuntu-22.04
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+    - id: skip_check
+      uses: fkirc/skip-duplicate-actions@v5
+      with:
+        concurrent_skipping: 'same_content'
+        cancel_others: 'true'
+        skip_after_successful_duplicate: 'true'
+        paths_ignore: '["**/README.md", "**/docs/**", "**/LICENSE"]'
+        do_not_skip: '["workflow_dispatch", "schedule"]'
+
+  build:
+    needs: skip_check
+    if: needs.skip_check.outputs.should_skip != 'true'
+
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Build
+      shell: bash
+      run: cargo build
+
+    - name: Copy files
+      shell: bash
+      run: ./scripts/create_package.sh ${{env.PACKAGE_DIR}} debug ytdlp_server
+
+    - name: Download third party binaries
+      shell: bash
+      run: ./scripts/download_ubuntu.sh
+
+    - name: Upload files 
+      uses: actions/upload-artifact@v3
+      with:
+        name: ytdlp_webui_ubuntu_x86
+        path: ${{github.workspace}}/${{env.PACKAGE_DIR}}

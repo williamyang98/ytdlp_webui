@@ -1,5 +1,6 @@
 # Introduction
 [![x86-windows](https://github.com/williamyang98/ytdlp_webui/actions/workflows/x86-windows.yml/badge.svg)](https://github.com/williamyang98/ytdlp_webui/actions/workflows/x86-windows.yml)
+[![x86-linux](https://github.com/williamyang98/ytdlp_webui/actions/workflows/x86-linux.yml/badge.svg)](https://github.com/williamyang98/ytdlp_webui/actions/workflows/x86-linux.yml)
 
 Download and convert Youtube videos into audio clips. Has a web UI client that wraps around ```yt-dlp``` and ```ffmpeg``` and caches downloaded and transcoded files locally.
 
@@ -16,6 +17,6 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 
 ## Building
 1. Download rust.
-2. Download ffmpeg and yt-dlp using ```./scripts/download_win32.sh``` or links for your platform.
+2. Download ffmpeg and yt-dlp using ```./scripts/download_*.sh``` for your platform.
 3. Build server: ```cargo build -r```
 4. Run server: ```cargo run -r```
