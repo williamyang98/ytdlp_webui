@@ -16,5 +16,6 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 
 ## Building
 1. Download rust.
-2. Build server: ```cargo build -r```
-3. Run server: ```cargo run -r```
+2. Download ffmpeg and yt-dlp using ```./scripts/download_win32.sh``` or links for your platform.
+3. Build server: ```cargo build -r```
+4. Run server: ```cargo run -r```

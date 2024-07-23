@@ -43,6 +43,10 @@ jobs:
       shell: bash
       run: ./scripts/create_package.sh ${{env.PACKAGE_DIR}} debug
 
+    - name: Download third party binaries
+      shell: bash
+      run: ./scripts/download_win32.sh
+
     - name: Upload files 
       uses: actions/upload-artifact@v3
       with:

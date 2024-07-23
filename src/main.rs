@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 use actix_web::{middleware, web, App, HttpServer};
 use clap::Parser;
 use dashmap::DashMap;
@@ -15,7 +16,7 @@ use ytdlp_server::{
 #[command(version, about, long_about = None)]
 struct Args {
     /// Url of server
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, default_value = "0.0.0.0")]
     url: String,
     /// Port of server
     #[arg(long, default_value_t = 8080)]
@@ -26,6 +27,12 @@ struct Args {
     /// Maximum number of worker threads
     #[arg(long, default_value_t = 0)]
     total_worker_threads: usize,
+    /// ffmpeg binary for transcoding between formats
+    #[arg(long)]
+    ffmpeg_binary_path: Option<String>,
+    /// yt-dlp binary for downloading from Youtube
+    #[arg(long)]
+    ytdlp_binary_path: Option<String>,
 }
 
 #[actix_web::main]
@@ -41,7 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
         x => x,
     };
-    let app_config = AppConfig::default();
+    let mut app_config = AppConfig::default();
+    if let Some(path) = args.ytdlp_binary_path { app_config.ytdlp_binary = PathBuf::from(path); }
+    if let Some(path) = args.ffmpeg_binary_path { app_config.ffmpeg_binary = PathBuf::from(path); }
     app_config.seed_directories()?;
     let db_manager = r2d2_sqlite::SqliteConnectionManager::file(app_config.root.join("index.db"));
     let db_pool = DatabasePool::new(db_manager)?;
