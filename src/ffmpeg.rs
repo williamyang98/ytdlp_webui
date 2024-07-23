@@ -131,7 +131,7 @@ pub struct TranscodeProgress {
     pub size_bytes: Option<usize>,
     pub total_time_transcoded: Option<Time>,
     pub speed_bits: Option<usize>,
-    pub speed_factor: Option<u32>,
+    pub speed_factor: Option<f32>,
 }
 
 #[derive(Clone,Copy,Debug,Default)]
@@ -150,7 +150,7 @@ pub enum ParsedStderrLine {
 pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
     lazy_static! {
         static ref PROGRESS_REGEX: Regex = Regex::new(format!(
-            r"size\s*=\s*(\d+)({0})\s+time\s*=\s*({1})\s+bitrate\s*=\s*({2})({3})\/s\s+speed\s*=\s*(\d+)\s*x",
+            r"size\s*=\s*(\d+)({0})\s+time\s*=\s*({1})\s+bitrate\s*=\s*({2})({3})\/s\s+speed\s*=\s*({2})\s*x",
             BYTES_REGEX, TIME_REGEX, FLOAT32_REGEX, BITS_LONG_REGEX,
         ).as_str()).unwrap();
         static ref SOURCE_INFO_REGEX: Regex = Regex::new(format!(
@@ -177,7 +177,7 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
                 _ => None,
             }
         };
-        let speed_factor: Option<u32> = captures.get(6).and_then(|m| m.as_str().parse().ok());
+        let speed_factor: Option<f32> = captures.get(6).and_then(|m| m.as_str().parse().ok());
         let result = TranscodeProgress {
             size_bytes,
             total_time_transcoded,

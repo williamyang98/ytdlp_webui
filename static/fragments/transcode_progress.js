@@ -119,7 +119,7 @@ export const TranscodeProgress = {
         table.transcode_size = `${size_bytes.toFixed(2)} ${size_bytes_unit}bytes`;
         let [bitrate, bitrate_units] = convert_to_short_standard_prefix(this.progress.transcode_speed_bits);
         table.transcode_bitrate = `${bitrate.toFixed(2)} ${bitrate_units}b/s`;
-        table.transcode_speed_factor = this.progress.transcode_speed_factor;
+        table.transcode_speed_factor = this.progress.transcode_speed_factor.toFixed(2);
       }
       return table;
     },

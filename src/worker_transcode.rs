@@ -42,7 +42,7 @@ pub struct TranscodeState {
     pub transcode_duration_milliseconds: Option<u64>,
     pub transcode_size_bytes: Option<usize>,
     pub transcode_speed_bits: Option<usize>,
-    pub transcode_speed_factor: Option<u32>,
+    pub transcode_speed_factor: Option<f32>,
 }
 
 impl Default for TranscodeState {
