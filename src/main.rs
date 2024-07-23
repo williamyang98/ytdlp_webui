@@ -14,6 +14,12 @@ use ytdlp_server::{
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Url of server
+    #[arg(long, default_value = "127.0.0.1")]
+    url: String,
+    /// Port of server
+    #[arg(long, default_value_t = 8080)]
+    port: u16,
     /// Maximum number of transcode threads
     #[arg(long, default_value_t = 0)]
     total_transcode_threads: usize,
@@ -25,8 +31,7 @@ struct Args {
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let mut env_logger_builder = env_logger::Builder::new();
-    env_logger_builder.filter_level(log::LevelFilter::Debug).init();
+    env_logger::init();
 
     let total_transcode_threads: usize = match args.total_transcode_threads {
         0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
@@ -63,13 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .service(routes::get_transcode)
                 .service(routes::get_download_state)
                 .service(routes::get_transcode_state)
+                .service(routes::get_download_link)
             )
             .service(actix_files::Files::new("/data", "./data/").show_files_listing())
             .service(actix_files::Files::new("/", "./static/").index_file("index.html"))
             .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind((args.url, args.port))?
     .workers(total_worker_threads)
     .run()
     .await?;

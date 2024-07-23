@@ -302,7 +302,7 @@ pub fn select_ytdlp_entry(
 ) -> Result<Option<YtdlpRow>, rusqlite::Error> {
     let table: &'static str = WorkerTable::YTDLP.into();
     let mut stmt = db_conn.prepare(format!(
-        "SELECT video_id, audio_ext, status, unix_time,\
+        "SELECT video_id, audio_ext, status, unix_time, infojson_path, \
          stdout_log_path, stderr_log_path, system_log_path, audio_path \
          FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str())?;
     stmt.query_row([video_id.as_str(), audio_ext.as_str()], map_ytdlp_row_to_entry).optional()

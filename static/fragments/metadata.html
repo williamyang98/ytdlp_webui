@@ -1,0 +1,23 @@
+<table class="w-100" v-if="metadata !== null">
+  <tbody>
+    <tr style="width: 20%"><td>Title</td><td>{{ metadata.snippet.title }}</td></tr>
+    <tr><td>Duration</td><td>{{ duration }}</td></tr>
+    <tr><td>Channel</td><td>{{ metadata.snippet.channelTitle }}</td></tr>
+    <tr><td>Video</td><td><a :href="video_link">Link</a></td></tr>
+    <tr><td>Metadata</td><td><a :href="metadata_link">Link</a></td></tr>
+    <template v-if="thumbnail != null">
+      <tr>
+        <td>Thumbnail</td>
+        <td><img :src="thumbnail.url" style="max-height: 200px"></img></td>
+      </tr>
+    </template>
+    <tr>
+      <td>Description</td>
+      <td>
+        <div style="overflow-x: auto; max-height: 100px">
+          {{ metadata.snippet.description }}
+        </div>
+      </td>
+    </tr>
+  </tbody>
+</table>

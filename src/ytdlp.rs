@@ -91,7 +91,7 @@ pub enum ParsedStdoutLine {
 pub fn parse_stdout_line(line: &str) -> Option<ParsedStdoutLine> {
     lazy_static! {
         static ref DOWNLOAD_PROGRESS_REGEX: Regex = Regex::new(format!(
-            r"\[download\]\s+({0})%\s+of\s+({0})({1})\s+at\s+({0})({1})/s\s+ETA\s+({2})", 
+            r"\[download\]\s+({0})%\s+of\s+(?:~\s+)?({0})({1})\s+at\s+({0})({1})/s\s+ETA\s+({2})",
             FLOAT32_REGEX, UNIT_REGEX, ETA_REGEX,
         ).as_str()).unwrap();
         static ref INFOJSON_REGEX: Regex = Regex::new(format!(

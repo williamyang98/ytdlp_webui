@@ -24,7 +24,8 @@ export const Table = {
     data: Array, // Array<Object>
     columns: Array, // Array<Column>
     actions: Array, // Array<String>
-    initSortColumn: String // Initial column to sort by
+    initSortColumn: String, // Initial column to sort by
+    selectedRow: Object, // Selected row
   },
   emits: ['row-select', 'row-action'],
   data() {
@@ -39,7 +40,6 @@ export const Table = {
       filter_values: {},
       sort_values: initial_sort_values,
       sort_key: null, // { name: String, is_ascending: bool }
-      selected_row: 0,
       ColumnType,
     }
   },
@@ -76,9 +76,8 @@ export const Table = {
     },
   },
   methods: {
-    select_row(index) {
-      this.selected_row = index; 
-      this.$emit("row-select", index);
+    select_row(entry) {
+      this.$emit("row-select", entry);
     },
     set_sort_key(column) {
       let sort_value = this.sort_values[column.name];
@@ -88,8 +87,8 @@ export const Table = {
       }
       this.sort_key = { name: column.name, is_ascending: sort_value.is_ascending };
     },
-    on_row_action(action, index) {
-      this.$emit("row-action", { action, index });
+    on_row_action(action, entry) {
+      this.$emit("row-action", { action, entry });
     },
   },
   mounted() {

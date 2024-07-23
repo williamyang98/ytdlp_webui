@@ -1,4 +1,4 @@
-<table class="sortable-table">
+<table class="sortable-table w-100">
   <thead>
     <tr>
       <td v-for="column in columns" :key="column">
@@ -23,9 +23,9 @@
       <tr
         v-for="row in filtered_data"
         :key="row[0]"
-        @click="select_row(row[0])" 
+        @click="select_row(row[1])" 
         class="table-row"
-        :class="{ 'selected': row[0] == selected_row }"
+        :class="{ 'selected': row[1] == selectedRow }"
       >
         <td v-for="column in columns">
           <template v-if="column.type == ColumnType.LINK">
@@ -35,11 +35,11 @@
         </td>
         <td v-if="actions !== undefined">
           <div class="d-flex flex-row">
-            <div 
+            <button
               v-for="action in actions" :key="action.name" 
-              @click.stop="on_row_action(action.name, row[0])"
-              class="action-button"
-            >{{ action.icon }}</div>
+              @click.stop="on_row_action(action.name, row[1])"
+            >{{ action.icon }}
+            </button>
           </div>
         </td>
       </tr>

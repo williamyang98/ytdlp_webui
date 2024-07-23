@@ -1,0 +1,24 @@
+<div class="progress w-100">
+  <div 
+    class="progress-bar" 
+    :class="progress_bar.class"
+    :style="{ width: progress_bar.width+'%' }"
+  >
+    <label>{{ progress_bar.text }}</label>
+  </div>
+</div>
+<div v-if="subtitle_text != null">{{ subtitle_text }}</div>
+<table v-if="showTable && (table_information != null)" class="w-100">
+  <tbody>
+    <tr><td style="width: 20%">Start time</td><td>{{ table_information.start_time }}</td></tr>
+    <tr><td>End time</td><td>{{ table_information.end_time }}</td></tr>
+    <tr><td>Elasped time</td><td>{{ table_information.elapsed_time }}</td></tr>
+    <template v-if="table_information.percentage !== undefined">
+      <tr><td>Percentage</td><td>{{ table_information.percentage }}</td></tr>
+      <tr><td>Download speed</td><td>{{ table_information.download_speed }}</td></tr>
+      <tr><td>Download size</td><td>{{ table_information.download_size }}</td></tr>
+      <tr><td>Total size</td><td>{{ table_information.total_size }}</td></tr>
+      <tr><td>ETA</td><td>{{ table_information.eta }}</td></tr>
+    </template>
+  </tbody>
+</table>

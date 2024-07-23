@@ -2,8 +2,38 @@ table, th, td {
   border: 1px solid black;
 }
 
-/* Common utility classes */
+/* Input label */
+.form-label {
+  display: flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #212529;
+  text-align: center;
+  white-space: nowrap;
+  background-color: #e9ecef;
+  border: 0.5px solid rgba(27,31,35,0.15);
+  border-radius: .25rem;
+  box-shadow: rgba(27,31,35,0.04) 0 1px 0, rgba(255,255,255,0.25) 0 1px 0 inset;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  color: #24292E;
+}
 
+.form-input-invalid {
+  border: 2px solid #dc3545;
+  border-radius: .25rem;
+}
+
+input.form-input-invalid {
+  background-image: url("./vendor/error_icon.svg");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+}
+
+/* Common utility classes */
 * {
   font-family: courier;
 }
@@ -11,14 +41,14 @@ table, th, td {
 /* Button */
 .btn {
   appearance: none;
-  border: 1px solid rgba(27, 31, 35, 0.15);
-  border-radius: 6px;
-  box-shadow: rgba(27, 31, 35, 0.04) 0 1px 0, rgba(255, 255, 255, 0.25) 0 1px 0 inset;
+  border: 1px solid rgba(27,31,35,0.15);
+  border-radius: .25rem;
+  box-shadow: rgba(27,31,35,0.04) 0 1px 0, rgba(255,255,255,0.25) 0 1px 0 inset;
   box-sizing: border-box;
   color: #24292E;
   cursor: pointer;
   display: inline-block;
-  font-size: 12px;
+  font-size: medium;
   font-weight: 400;
   line-height: 1.5;
   list-style: none;
@@ -96,6 +126,75 @@ button[disabled] {
 .btn-group-vertical>.btn, .btn-group>.btn {
   position: relative;
   float: left;
+}
+
+/* Progress bar */
+.progress {
+  display: flex;
+  height: 1.5rem;
+  overflow: hidden;
+  font-size: 1.2rem;
+  background-color: #e9ecef;
+  border: 1px solid black;
+}
+
+.progress-bar {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: #fff;
+  text-align: center;
+  transition: width .6s ease;
+  font-weight: bold;
+  min-width: 5rem;
+}
+
+.progress-bar-striped {
+  background-image: linear-gradient(
+    45deg, rgba(255,255,255,.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255,255,255,.15) 50%,
+    rgba(255,255,255,.15) 75%,
+    transparent 75%,
+    transparent
+  )
+}
+
+.progress-bar label {
+  text-align: center;
+  padding-left: auto;
+  padding-right: auto;
+}
+
+/* Common colors */
+.bg-primary {
+  background-color: #007bff !important;
+}
+
+.bg-success {
+  background-color: #28a745 !important
+}
+
+.bg-warning {
+  background-color: #ffc107 !important;
+}
+
+.bg-danger {
+  background-color: #dc3545 !important;
+}
+
+.text-danger {
+  color: #dc3545 !important;
+}
+
+/* Common */
+.container {
+  max-width: 960px;
+  width: 100%;
+  margin-right: auto;
+  margin-left: auto;
+  padding: 2px;
 }
 
 /* Helpers */

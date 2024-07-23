@@ -1,0 +1,27 @@
+<div class="progress w-100">
+  <div 
+    class="progress-bar" 
+    :class="progress_bar.class"
+    :style="{ width: progress_bar.width+'%' }"
+  >
+    <label>{{ progress_bar.text }}</label>
+  </div>
+</div>
+<div v-if="subtitle_text != null">{{ subtitle_text }}</div>
+<table v-if="showTable && (table_information != null)" class="w-100">
+  <tbody>
+    <tr><td style="width: 20%">Start time</td><td>{{ table_information.start_time }}</td></tr>
+    <tr><td>End time</td><td>{{ table_information.end_time }}</td></tr>
+    <tr><td>Elasped time</td><td>{{ table_information.elapsed_time }}</td></tr>
+    <template v-if="table_information.source_length !== undefined">
+      <tr><td>Source length</td><td>{{ table_information.source_length }}</td></tr>
+      <tr><td>Source bitrate</td><td>{{ table_information.source_bitrate }}</td></tr>
+    </template>
+    <template v-if="table_information.transcode_length !== undefined">
+      <tr><td>Transcode length</td><td>{{ table_information.transcode_length }}</td></tr>
+      <tr><td>Transcode size</td><td>{{ table_information.transcode_size }}</td></tr>
+      <tr><td>Transcode bitrate</td><td>{{ table_information.transcode_bitrate }}</td></tr>
+      <tr><td>Transcode speed</td><td>{{ table_information.transcode_speed_factor }}x</td></tr>
+    </template>
+  </tbody>
+</table>

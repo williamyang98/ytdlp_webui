@@ -1,77 +1,133 @@
 <html>
   <head>
     <title>Youtube downloader webui</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="./index.css">
-    <link rel="stylesheet" href="./table.css">
+    <link rel="stylesheet" href="./fragments/table.css">
   </head>
   <body>
-    <template id="sortable-table" href="./table.html"></template>
-    <template id="entry-description">
-      <table>
-        <tr><td>Filename</td><td>{{ entry.video_id }}.{{ entry.audio_ext }}</td></tr>
-        <tr><td>Status</td><td>{{ entry.status }}</td></tr>
-        <tr><td>Time</td><td>{{ entry.unix_time }}</td></tr>
-        <template v-if="entry.audio_path">
-          <tr><td>Audio</td><td><a :href="entry.audio_path.replaceAll('\\', '/')">Link</a></td></tr>
-        </template>
-        <template v-if="entry.infojson_path">
-          <tr><td>Metadata</td><td><a :href="entry.infojson_path.replaceAll('\\', '/')">Link</a></td></tr>
-        </template>
-        <template v-if="entry.stdout_log_path">
-          <tr><td>Stdout log</td><td><a :href="entry.stdout_log_path.replaceAll('\\', '/')">Link</a></td></tr>
-        </template>
-        <template v-if="entry.stderr_log_path">
-          <tr><td>Stderr log</td><td><a :href="entry.stderr_log_path.replaceAll('\\', '/')">Link</a></td></tr>
-        </template>
-        <template v-if="entry.system_log_path">
-          <tr><td>System log</td><td><a :href="entry.system_log_path.replaceAll('\\', '/')">Link</a></td></tr>
-        </template>
-      </table>
-    </template>
-    <div id="app">
-      <h2>Transcode request</h2>
+    <template id="sortable-table" href="./fragments/table.html"></template>
+    <template id="download-progress" href="./fragments/download_progress.html"></template>
+    <template id="transcode-progress" href="./fragments/transcode_progress.html"></template>
+    <template id="yt-metadata" href="./fragments/metadata.html"></template>
+    <div id="app" class="container">
       <div>
-        <label>URL</label><input type="text" v-model="transcode_request.url" placeholder="Youtube URL"/>
-        <label>Format</label>
-        <select v-model="transcode_request.format">
-          <option value="mp3">mp3</option>
-          <option value="m4a">m4a</option>
-          <option value="webm">webm</option>
-          <option value="aac">aac</option>
-        </select>
-        <button @click="request_transcode()">Request</button>
-        <button @click="get_transcode_progress()">Get progress</button>
-        <br>
-        <ul>
-          <li v-if="transcode_request.url_error !== null">URL error: {{ transcode_request.url_error }}</li>
-          <li>Response: {{ transcode_request.response }}</li>
-          <li>Download state: {{ transcode_request.download_state }}</li>
-          <li>Transcode state: {{ transcode_request.transcode_state }}</li>
-        </ul>
+        <h2 class="my-auto">Transcode request</h2>
+        <div class="d-flex flex-row" style="height: 2rem; padding-top: 2px">
+          <button @click="transcode_request.url = null; update_request_id()">Clear</button>
+          <input 
+            type="text" class="flex-grow-1" 
+            v-model="transcode_request.url" 
+            placeholder="Youtube URL"
+            @blur="update_request_id()"
+            :class="{ 'form-input-invalid': transcode_request.url_error !== null }"
+          />
+          <select v-model="transcode_request.format">
+            <option value="mp3">mp3</option>
+            <option value="m4a">m4a</option>
+            <option value="webm">webm</option>
+            <option value="aac">aac</option>
+          </select>
+          <button :disabled="disable_submit" @click="try_request_transcode()">Request</button>
+        </div>
+        <label v-if="transcode_request.url_error !== null" class="text-danger">{{ transcode_request.url_error }}</label>
+        <template v-if="focused_transcode.video_id !== null">
+          <br>
+          <h4 class="my-auto">Download Link</h4>
+          <div class="d-flex flex-row" style="height: 2rem">
+            <input 
+              type="text" class="flex-grow-1"
+              v-model="focused_transcode.download_name"
+              placeholder="Filename"
+            />
+            <button :disabled="download_link == null" @click="download_file()">Download</button>
+          </div>
+        </template>
+        <div v-if="focused_transcode.download_key !== null">
+          <h5 class="my-auto">Download status</h5>
+          <download-progress
+            v-if="download_state_cache[focused_transcode.download_key] !== undefined"
+            :state="download_state_cache[focused_transcode.download_key]"
+            :progress="download_progress_cache[focused_transcode.download_key]"
+            :show-table="false"
+          ></download-progress>
+        </div>
+        <div v-if="focused_transcode.transcode_key !== null">
+          <h5 class="my-auto">Transcode status</h5>
+          <transcode-progress
+            v-if="transcode_state_cache[focused_transcode.transcode_key] !== undefined"
+            :state="transcode_state_cache[focused_transcode.transcode_key]"
+            :progress="transcode_progress_cache[focused_transcode.transcode_key]"
+            :show-table="false"
+          ></transcode-progress>
+        </div>
+        <template v-if="metadata !== null">
+          <br>
+          <h4 class="my-auto">Metadata</h4>
+          <div class="w-100" style="overflow-x: auto">
+            <yt-metadata :metadata="metadata"></yt-metadata>
+          </div>
+        </template>
       </div>
       <br>
-      <h2>Downloads</h2>
-      <button @click="refresh_downloads()">Refresh downloads</button>
-      <sortable-table 
-        :columns="download_list_columns" :data="download_list" :init-sort-column="'unix_time'"
-        :actions="[{ name: 'delete', icon: '🗑'}]"
-        @row-select="(index) => download_list_index = index"
-        @row-action="(action) => on_download_table_action(action)"
-      ></sortable-table>
-      <entry-description :entry="download_entry" v-if="download_entry !== undefined"></entry-description>
       <br>
-      <h2>Transcodes</h2>
-      <button @click="refresh_transcodes()">Refresh transcodes</button>
-      <sortable-table
-        :columns="transcode_list_columns" :data="transcode_list" :init-sort-column="'unix_time'"
-        :actions="[{ name: 'delete', icon: '🗑'}]"
-        @row-select="(index) => transcode_list_index = index"
-        @row-action="(action) => on_transcode_table_action(action)"
-      ></sortable-table>
-      <entry-description :entry="transcode_entry" v-if="transcode_entry !== undefined"></entry-description>
+      <div>
+        <div class="d-flex flex-row w-100">
+          <h2 class="flex-grow-1 my-auto">Downloads</h2>
+          <div class="my-auto">
+            <button @click="refresh_downloads()">Refresh</button>
+          </div>
+        </div>
+        <div class="w-100" style="overflow-x: auto">
+          <sortable-table 
+            :columns="download_state_columns"
+            :data="Object.values(download_state_cache)" :init-sort-column="'unix_time'" 
+            :selected-row="download_state_cache[download_focus_key]"
+            :actions="[{ name: 'delete', icon: 'Delete'}]"
+            @row-select="(entry) => on_download_select(entry)"
+            @row-action="(x) => on_download_table_action(x)"
+          ></sortable-table>
+        </div>
+        <br>
+        <download-progress
+          v-if="(download_focus_key !== null) && (download_state_cache[download_focus_key] !== undefined)"
+          :state="download_state_cache[download_focus_key]"
+          :progress="download_progress_cache[download_focus_key]"
+          :show-table="true"
+        ></download-progress>
+      </div>
+      <br>
+      <br>
+      <div>
+        <div class="d-flex flex-row w-100">
+          <h2 class="flex-grow-1 my-auto">Transcodes</h2>
+          <div class="my-auto">
+            <button @click="refresh_transcodes()">Refresh</button>
+          </div>
+        </div>
+        <div class="w-100" style="overflow-x: auto">
+          <sortable-table
+            :columns="transcode_state_columns"
+            :data="Object.values(transcode_state_cache)" :init-sort-column="'unix_time'"
+            :selected-row="transcode_state_cache[transcode_focus_key]"
+            :actions="[{ name: 'delete', icon: 'Delete'}]"
+            @row-select="(entry) => on_transcode_select(entry)"
+            @row-action="(x) => on_transcode_table_action(x)"
+          ></sortable-table>
+        </div>
+        <br>
+        <transcode-progress
+          v-if="(transcode_focus_key !== null) && (transcode_state_cache[transcode_focus_key] !== undefined)"
+          :state="transcode_state_cache[transcode_focus_key]"
+          :progress="transcode_progress_cache[transcode_focus_key]"
+          :show-table="true"
+        ></transcode-progress>
+      </div>
     </div>
     <script type="module">
-      import { create_app, load_html_fragments } from "./index.js";
+      import { create_app } from "./index.js";
+      import { load_html_fragments } from "./util.js";
       await load_html_fragments();
       create_app().mount("#app");
     </script>

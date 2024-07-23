@@ -23,6 +23,7 @@ pub struct DownloadState {
     pub fail_reason: Option<String>,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
+    pub percentage: Option<f32>,
     pub downloaded_bytes: Option<usize>,
     pub size_bytes: Option<usize>,
     pub speed_bytes: Option<usize>,
@@ -37,6 +38,7 @@ impl Default for DownloadState {
             fail_reason: None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
+            percentage: None,
             downloaded_bytes: None,
             size_bytes: None,
             speed_bytes: None,
@@ -54,6 +56,7 @@ fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
 impl DownloadState {
     pub fn update_from_ytdlp(&mut self, progress: ytdlp::DownloadProgress) {
         self.end_time_unix = get_unix_time();
+        update_field(&mut self.percentage, progress.percentage);
         update_field(&mut self.size_bytes, progress.size_bytes);
         if let Some(size_bytes) = progress.size_bytes {
             if let Some(percentage) = progress.percentage {
