@@ -6,8 +6,11 @@ use thiserror::Error;
 enum SizeBytes {
     Byte,
     KiB,
+    KB,
     MiB,
+    MB,
     GiB,
+    GB,
 }
 
 impl TryFrom<&str> for SizeBytes {
@@ -16,8 +19,12 @@ impl TryFrom<&str> for SizeBytes {
         match v {
             "B"   => Ok(Self::Byte),
             "KiB" => Ok(Self::KiB),
+            "KB" => Ok(Self::KB),
+            "kB" => Ok(Self::KB),
             "MiB" => Ok(Self::MiB),
+            "MB" => Ok(Self::MB),
             "GiB" => Ok(Self::GiB),
+            "GB" => Ok(Self::GB),
             _ => Err("Unknown unit"),
         }
     }
@@ -27,9 +34,12 @@ impl SizeBytes {
     fn to_bytes(self) -> usize {
         match self {
             Self::Byte => 1,
-            Self::KiB => 1_000,
-            Self::MiB => 1_000_000,
-            Self::GiB => 1_000_000_000,
+            Self::KiB => 1024,
+            Self::MiB => 1024*1024,
+            Self::GiB => 1024*1024*1024,
+            Self::KB => 1000,
+            Self::MB => 1000*1000,
+            Self::GB => 1000*1000*1000,
         }
     }
 }
@@ -121,7 +131,7 @@ impl Time {
 }
 
 const FLOAT32_REGEX: &str = r"\d+(?:\.\d+)?";
-const BYTES_REGEX: &str = r"[KMG]iB";
+const BYTES_REGEX: &str = r"[kKMG]i?B";
 const BITS_LONG_REGEX: &str = r"[kMG]?bits";
 const BITS_SHORT_REGEX: &str = r"[kMG]?b";
 const TIME_REGEX: &str = r"(?:\d+:)*\d+(?:\.\d+)?";
