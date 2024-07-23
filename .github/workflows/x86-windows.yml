@@ -6,8 +6,7 @@ on:
     branches: [ "master", "main", "dev" ]
 
 env:
-  BUILD_TYPE: Release
-  PACKAGE_DIR: ytdlp_server
+  PACKAGE_DIR: package
 
 jobs:
   skip_check:
@@ -38,22 +37,14 @@ jobs:
 
     - name: Build
       shell: bash
-      run: cargo build -r
+      run: cargo build
 
     - name: Copy files
       shell: bash
-      run: |
-        mkdir -p ${{env.PACKAGE_DIR}}
-        cp ${{github.workspace}}/target/release/ytdlp_server.exe ${{env.PACKAGE_DIR}}/
-        cp ${{github.workspace}}/README.md ${{env.PACKAGE_DIR}}/
-        cp ${{github.workspace}}/LICENSE ${{env.PACKAGE_DIR}}/
-        cp -rf ${{github.workspace}}/static/ ${{env.PACKAGE_DIR}}/
-        cp -rf ${{github.workspace}}/bin/ ${{env.PACKAGE_DIR}}/
-        cp -rf ${{github.workspace}}/scripts/ ${{env.PACKAGE_DIR}}/
-        cp -rf ${{github.workspace}}/docs/ ${{env.PACKAGE_DIR}}/
+      run: ./scripts/create_package.sh ${{env.PACKAGE_DIR}} debug
 
     - name: Upload files 
       uses: actions/upload-artifact@v3
       with:
-        name: ytdlp_server_windows_x86
+        name: ytdlp_webui_windows_x86
         path: ${{github.workspace}}/${{env.PACKAGE_DIR}}
