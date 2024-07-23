@@ -1,0 +1,59 @@
+name: x86-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master", "main", "dev" ]
+
+env:
+  BUILD_TYPE: Release
+  PACKAGE_DIR: ytdlp_server
+
+jobs:
+  skip_check:
+    continue-on-error: false
+    runs-on: ubuntu-22.04
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+    - id: skip_check
+      uses: fkirc/skip-duplicate-actions@v5
+      with:
+        concurrent_skipping: 'same_content'
+        cancel_others: 'true'
+        skip_after_successful_duplicate: 'true'
+        paths_ignore: '["**/README.md", "**/docs/**", "**/LICENSE"]'
+        do_not_skip: '["workflow_dispatch", "schedule"]'
+
+  build:
+    needs: skip_check
+    if: needs.skip_check.outputs.should_skip != 'true'
+
+    runs-on: windows-2022
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Build
+      shell: bash
+      run: cargo build -r
+
+    - name: Copy files
+      shell: bash
+      run: |
+        mkdir -p ${{env.PACKAGE_DIR}}
+        cp ${{github.workspace}}/target/release/ytdlp_server.exe ${{env.PACKAGE_DIR}}/
+        cp ${{github.workspace}}/README.md ${{env.PACKAGE_DIR}}/
+        cp ${{github.workspace}}/LICENSE ${{env.PACKAGE_DIR}}/
+        cp -rf ${{github.workspace}}/static/ ${{env.PACKAGE_DIR}}/
+        cp -rf ${{github.workspace}}/bin/ ${{env.PACKAGE_DIR}}/
+        cp -rf ${{github.workspace}}/scripts/ ${{env.PACKAGE_DIR}}/
+        cp -rf ${{github.workspace}}/docs/ ${{env.PACKAGE_DIR}}/
+
+    - name: Upload files 
+      uses: actions/upload-artifact@v3
+      with:
+        name: ytdlp_server_windows_x86
+        path: ${{github.workspace}}/${{env.PACKAGE_DIR}}

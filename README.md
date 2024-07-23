@@ -1,4 +1,6 @@
 # Introduction
+[![x86-windows](https://github.com/williamyang98/ytdlp_webui/actions/workflows/x86-windows.yml/badge.svg)](https://github.com/williamyang98/ytdlp_webui/actions/workflows/x86-windows.yml)
+
 Download and convert Youtube videos into audio clips. Has a web UI client that wraps around ```yt-dlp``` and ```ffmpeg``` and caches downloaded and transcoded files locally.
 
 ## Usage
