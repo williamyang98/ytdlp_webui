@@ -275,6 +275,7 @@ fn enqueue_transcode_worker(
     let process_res = Command::new(app_config.ffmpeg_binary.clone())
         .args([
             "-i", source_path.to_str().unwrap(),
+            "-threads", "0",
             "-progress", "-", "-y",
             audio_path.to_str().unwrap(),
         ])
