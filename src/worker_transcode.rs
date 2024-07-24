@@ -6,16 +6,16 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use dashmap::DashMap;
-use num_traits::{FromPrimitive,ToPrimitive};
 use serde::Serialize;
 use thiserror::Error;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
 use crate::database::{
-    DatabasePool, VideoId, AudioExtension, WorkerStatus, WorkerTable, 
-    update_worker_fields, insert_worker_entry, update_worker_status, select_worker_fields,
+    DatabasePool, VideoId, AudioExtension, WorkerStatus,
+    select_and_update_ffmpeg_entry, select_ffmpeg_entry, insert_ffmpeg_entry,
+    select_ytdlp_entry,
 };
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
-use crate::worker_download::{DownloadCache, DOWNLOAD_AUDIO_EXT};
+use crate::worker_download::DownloadCache;
 use crate::ffmpeg;
 
 #[derive(Clone,Debug,PartialEq,Eq,Hash)]
@@ -121,8 +121,6 @@ pub enum TranscodeError {
     DatabaseExecute(#[from] rusqlite::Error),
 }
 
-const DB_TABLE: WorkerTable = WorkerTable::FFMPEG;
-
 pub fn try_start_transcode_worker(
     key: TranscodeKey,
     download_cache: DownloadCache, transcode_cache: TranscodeCache, app_config: AppConfig, 
@@ -160,14 +158,11 @@ pub fn try_start_transcode_worker(
     {
         let db_conn = db_pool.get()?;
         // check if transcode finished on disk (cache miss due to reset)
-        let res: Option<(Option<WorkerStatus>, Option<String>)> = select_worker_fields(
-            &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-            &["status", "audio_path"],
-            |row| Ok((WorkerStatus::from_u8(row.get(0)?), row.get(1)?)),
-        )?;
-        if let Some((Some(status), Some(audio_path))) = res {
-            let audio_path = PathBuf::from(audio_path);
-            if status == WorkerStatus::Finished && audio_path.exists() {
+        if let Some(entry) = select_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext)? {
+            if let Some(_audio_path) = entry.audio_path {
+                let status = entry.status;
+                // TODO: Check if deleted
+                // let audio_path = PathBuf::from(audio_path);
                 let transcode_state = transcode_cache.entry(key.clone()).or_default();
                 let mut state = transcode_state.0.lock().unwrap();
                 state.worker_status = status;
@@ -178,7 +173,7 @@ pub fn try_start_transcode_worker(
             }
         }
         // start transcode worker
-        let _ = insert_worker_entry(&db_conn, &key.video_id, key.audio_ext, DB_TABLE)?;
+        let _ = insert_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext)?;
     }
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching transcode process: {0}", key.as_str());
@@ -192,10 +187,9 @@ pub fn try_start_transcode_worker(
             },
         };
         if let Ok(db_conn) = db_pool.get() {
-            let _ = update_worker_fields(
-                &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-                &["system_log_path"], &[&system_log_path.to_str().unwrap()]
-            );
+            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+                entry.system_log_path = Some(system_log_path.to_str().unwrap().to_owned());
+            }).unwrap();
         }
         let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
         // launch process
@@ -211,13 +205,13 @@ pub fn try_start_transcode_worker(
             Ok(path) => (Some(path), WorkerStatus::Finished, None),
             Err(err) => (None, WorkerStatus::Failed, Some(err)),
         };
-        let db_conn = db_pool.get().unwrap();
-        update_worker_fields(
-            &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-            &["audio_path", "status"], 
-            &[&audio_path.map(|p| p.to_str().unwrap().to_string()), &worker_status.to_u8().unwrap()],
-        ).unwrap();
-        drop(db_conn);
+        {
+            let db_conn = db_pool.get().unwrap();
+            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+                entry.audio_path = audio_path.map(|p| p.to_str().unwrap().to_string());
+                entry.status = worker_status;
+            }).unwrap();
+        }
         // NOTE: update cache so changes to database are visible to signal listeners
         let transcode_state = transcode_cache.entry(key.clone()).or_default();
         let mut state = transcode_state.0.lock().unwrap();
@@ -251,10 +245,8 @@ fn enqueue_transcode_worker(
     // get source file to transcode
     let source_path: Option<String> = {
         let db_conn = db_pool.get()?;
-        select_worker_fields(
-            &db_conn, &key.video_id, DOWNLOAD_AUDIO_EXT, WorkerTable::YTDLP,
-            &["audio_path"], |row| row.get(0),
-        )?
+        let entry = select_ytdlp_entry(&db_conn, &key.video_id)?.expect("Entry should exist");
+        entry.audio_path
     };
     let Some(source_path) = source_path else {
         return Err(TranscodeError::DownloadPathMissing);
@@ -299,7 +291,9 @@ fn enqueue_transcode_worker(
     }
     {
         let db_conn = db_pool.get()?;
-        let _ = update_worker_status(&db_conn, &key.video_id, key.audio_ext, WorkerStatus::Running, DB_TABLE)?;
+        let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+            entry.status = WorkerStatus::Running;
+        })?;
     }
     // scrape stdout and stderr
     let stdout_thread = thread::spawn({
@@ -311,10 +305,9 @@ fn enqueue_transcode_worker(
         let mut stdout_log_writer = BufWriter::new(stdout_log_file);
         {
             let db_conn = db_pool.get()?;
-            let _ = update_worker_fields(
-                &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-                &["stdout_log_path"], &[&stdout_log_path.to_str().unwrap()],
-            )?;
+            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+                entry.stdout_log_path = Some(stdout_log_path.to_str().unwrap().to_owned());
+            })?;
         }
         move || -> Result<(), WorkerError> {
             let mut line = String::new();
@@ -339,10 +332,9 @@ fn enqueue_transcode_worker(
         let mut stderr_log_writer = BufWriter::new(stderr_log_file);
         {
             let db_conn = db_pool.get()?;
-            let _ = update_worker_fields(
-                &db_conn, &key.video_id, key.audio_ext, DB_TABLE,
-                &["stderr_log_path"], &[&stderr_log_path.to_str().unwrap()],
-            )?;
+            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+                entry.stderr_log_path = Some(stderr_log_path.to_str().unwrap().to_owned());
+            })?;
         }
         move || -> Result<(), WorkerError> {
             let mut line = String::new();

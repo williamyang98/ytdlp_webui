@@ -1,136 +1,82 @@
+use std::ffi::OsStr;
 use lazy_static::lazy_static;
 use regex::Regex;
-use thiserror::Error;
 use serde::Serialize;
 
-#[derive(Clone,Copy,Debug)]
-enum SizeBytes {
-    Byte,
-    KiB,
-    MiB,
-    GiB,
-}
-
-impl TryFrom<&str> for SizeBytes {
-    type Error = &'static str;
-    fn try_from(v: &str) -> Result<Self, Self::Error> {
-        match v {
-            "B"   => Ok(Self::Byte),
-            "KiB" => Ok(Self::KiB),
-            "MiB" => Ok(Self::MiB),
-            "GiB" => Ok(Self::GiB),
-            _ => Err("Unknown unit"),
-        }
-    }
-}
-
-impl SizeBytes {
-    fn to_bytes(self) -> usize {
-        match self {
-            Self::Byte => 1,
-            Self::KiB => 1_000,
-            Self::MiB => 1_000_000,
-            Self::GiB => 1_000_000_000,
-        }
-    }
+// NOTE: The ytdlp cli output is not stable, but we can manually format certain outputs
+//       We will then do pattern matching on that controlled output
+pub fn get_ytdlp_arguments<'a>(url: &'a str, ffmpeg_binary_path: &'a str, output_format: &'a str) -> impl IntoIterator<Item=impl AsRef<OsStr> + 'a> {
+    [
+        url,
+        "--no-continue", // override existing files
+        "--extract-audio",
+        "--format", "bestaudio",
+        "--no-continue", // override existing files
+        "--no-simulate", // avoid running simulation when changing templates
+        "--ffmpeg-location", ffmpeg_binary_path,
+        // format progress string
+        "--progress", "--newline",
+        "--progress-template", concat!(
+            "@[progress] ",
+            "eta=%(progress.eta)d,elapsed=%(progress.elapsed)d,",
+            "downloaded_bytes=%(progress.downloaded_bytes)d,total_bytes=%(progress.total_bytes)d,",
+            "speed=%(progress.speed)d",
+        ),
+        "--output", output_format, // "%(id)s.%(ext)s", // detect name of audio after command runs
+        "--print", "@[download-path] %(filename)s",
+        "--print", "before_dl:@[before-dl-path] %(filename)s",
+        "--print", "pre_process:@[pre-process-path] %(filename)s",
+        "--print", "post_process:@[post-process-path] %(filename)s",
+        "--print", "after_move:@[after-move-path] %(filename)s",
+        "--verbose", // print extra debug info to stderr
+    ]
 }
 
 #[derive(Clone,Copy,Debug,Default,Serialize)]
-pub struct Eta {
-    pub days: u8,
-    pub hours: u8,
-    pub minutes: u8,
-    pub seconds: u8,
-}
-
-#[derive(Clone,Debug,Error)]
-pub enum EtaParseError {
-    #[error("Failed to parse seconds: {0}")]
-    InvalidSeconds(std::num::ParseIntError),
-    #[error("Failed to parse minutes: {0}")]
-    InvalidMinutes(std::num::ParseIntError),
-    #[error("Failed to parse hours: {0}")]
-    InvalidHours(std::num::ParseIntError),
-    #[error("Failed to parse days: {0}")]
-    InvalidDays(std::num::ParseIntError),
-}
-
-impl Eta {
-    pub fn try_from_str(v: &str) -> Result<Self, EtaParseError> {
-        type E = EtaParseError;
-        let mut parts: Vec<&str> = v.split(':').collect();
-        parts.reverse();
-        let mut eta = Eta::default();
-        if let Some(v) = parts.first() { eta.seconds = v.parse().map_err(E::InvalidSeconds)?; }
-        if let Some(v) = parts.get(1) { eta.minutes = v.parse().map_err(E::InvalidMinutes)?; }
-        if let Some(v) = parts.get(2) { eta.hours = v.parse().map_err(E::InvalidHours)?; }
-        if let Some(v) = parts.get(3) { eta.days = v.parse().map_err(E::InvalidDays)?; }
-        Ok(eta)
-    }
-}
-
-#[derive(Clone,Copy,Debug,Default)]
 pub struct DownloadProgress {
-    pub percentage: Option<f32>,
-    pub size_bytes: Option<usize>,
+    pub eta_seconds: Option<u64>,
+    pub elapsed_seconds: Option<u64>,
+    pub downloaded_bytes: Option<usize>,
+    pub total_bytes: Option<usize>,
     pub speed_bytes: Option<usize>,
-    pub eta: Option<Eta>,
 }
 
 const YOUTUBE_ID_REGEX: &str = r"[a-zA-Z0-9\\/.\-\_]+";
-const FLOAT32_REGEX: &str = r"\d*[.]?\d+";
-const UNIT_REGEX: &str = r"[KMG]iB";
-const ETA_REGEX: &str = r"[0-9:]+";
 
 #[derive(Debug)]
 pub enum ParsedStdoutLine {
     DownloadProgress(DownloadProgress),
-    InfoJsonPath(String),
+    OutputPath(String),
 }
 
 pub fn parse_stdout_line(line: &str) -> Option<ParsedStdoutLine> {
     lazy_static! {
-        static ref DOWNLOAD_PROGRESS_REGEX: Regex = Regex::new(format!(
-            r"\[download\]\s+({0})%\s+of\s+(?:~\s+)?({0})({1})\s+at\s+({0})({1})/s\s+ETA\s+({2})",
-            FLOAT32_REGEX, UNIT_REGEX, ETA_REGEX,
-        ).as_str()).unwrap();
-        static ref INFOJSON_REGEX: Regex = Regex::new(format!(
-            r"\[info\]\s+Writing video metadata as JSON to:\s+({0})", 
-            YOUTUBE_ID_REGEX,
+        static ref DOWNLOAD_PROGRESS_REGEX: Regex = Regex::new(
+            r"@\[progress\]\s+eta=(\d+)?,elapsed=(\d+)?,downloaded_bytes=(\d+),total_bytes=(\d+),speed=(\d+)?",
+        ).unwrap();
+        static ref OUTPUT_PATH_REGEX: Regex = Regex::new(format!(
+            r"@\[after-move-path\]\s+({0})", YOUTUBE_ID_REGEX,
         ).as_str()).unwrap();
     }
     let line = line.trim();
     if let Some(captures) = DOWNLOAD_PROGRESS_REGEX.captures(line) {
-        let percentage: Option<f32> = captures.get(1).and_then(|m| m.as_str().parse().ok());
-        let size_bytes = {
-            let value: Option<f32> = captures.get(2).and_then(|m| m.as_str().parse().ok());
-            let unit: Option<SizeBytes> = captures.get(3).and_then(|m| m.as_str().try_into().ok());
-            match (value, unit) {
-                (Some(value), Some(unit)) => Some((value * unit.to_bytes() as f32) as usize),
-                _ => None,
-            }
-        };
-        let speed_bytes = {
-            let value: Option<f32> = captures.get(4).and_then(|m| m.as_str().parse().ok());
-            let unit: Option<SizeBytes> = captures.get(5).and_then(|m| m.as_str().try_into().ok());
-            match (value, unit) {
-                (Some(value), Some(unit)) => Some((value * unit.to_bytes() as f32) as usize),
-                _ => None,
-            }
-        };
-        let eta: Option<Eta> = captures.get(6).and_then(|m| Eta::try_from_str(m.as_str()).ok());
+        let eta_seconds: Option<u64> = captures.get(1).and_then(|m| m.as_str().parse().ok());
+        let elapsed_seconds: Option<u64> = captures.get(2).and_then(|m| m.as_str().parse().ok());
+        let downloaded_bytes: Option<usize> = captures.get(3).and_then(|m| m.as_str().parse().ok());
+        let total_bytes: Option<usize> = captures.get(4).and_then(|m| m.as_str().parse().ok());
+        let speed_bytes: Option<usize> = captures.get(5).and_then(|m| m.as_str().parse().ok());
         let result = DownloadProgress {
-            percentage,
-            size_bytes,
+            eta_seconds,
+            elapsed_seconds,
+            downloaded_bytes,
+            total_bytes,
             speed_bytes,
-            eta,
         };
         return Some(ParsedStdoutLine::DownloadProgress(result));
     }
-    if let Some(captures) = INFOJSON_REGEX.captures(line) {
-        if let Some(infojson_path) = captures.get(1).map(|m| m.as_str()) {
-            return Some(ParsedStdoutLine::InfoJsonPath(infojson_path.to_owned()));
-        }
+    if let Some(captures) = OUTPUT_PATH_REGEX.captures(line) {
+        let filename: Option<String> = captures.get(1).map(|m| m.as_str().to_owned());
+        return Some(ParsedStdoutLine::OutputPath(filename?));
     }
     None
 }

@@ -8,10 +8,11 @@ use actix_web::{
 use serde::{Deserialize, Serialize};
 use derive_more::Display;
 use crate::database::{
-    DatabasePool, VideoId, VideoIdError, AudioExtension, WorkerStatus, WorkerTable,
-    delete_worker_entry, select_ytdlp_entries, select_ffmpeg_entries, select_ytdlp_entry, select_ffmpeg_entry,
+    DatabasePool, VideoId, VideoIdError, AudioExtension, WorkerStatus,
+    delete_ffmpeg_entry, select_ffmpeg_entries, select_ffmpeg_entry,
+    delete_ytdlp_entry, select_ytdlp_entries, select_ytdlp_entry,
 };
-use crate::worker_download::{try_start_download_worker, DownloadCache, DownloadState, DOWNLOAD_AUDIO_EXT};
+use crate::worker_download::{try_start_download_worker, DownloadCache, DownloadState};
 use crate::worker_transcode::{try_start_transcode_worker, TranscodeCache, TranscodeState, TranscodeKey};
 use crate::app::{AppConfig, WorkerThreadPool};
 
@@ -24,7 +25,7 @@ struct ApiError {
 }
 
 impl ApiError {
-    fn new(error: String, status_code: StatusCode) -> Self {
+    fn _new(error: String, status_code: StatusCode) -> Self {
         Self { error, status_code }
     }
 
@@ -87,16 +88,11 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
         video_id.clone(),
         download_cache.clone(), app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
     ).map_err(ApiError::internal_server)?;
-    if audio_ext == DOWNLOAD_AUDIO_EXT {
-        // skip transcode
-        response.is_skip_transcode = true;
-    } else {
-        // transcode
-        response.transcode_status = try_start_transcode_worker(
-            transcode_key.clone(),
-            download_cache, transcode_cache, app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
-        ).map_err(ApiError::internal_server)?;
-    }
+    // transcode
+    response.transcode_status = try_start_transcode_worker(
+        transcode_key.clone(),
+        download_cache, transcode_cache, app_config.clone(), db_pool.clone(), worker_thread_pool.clone(),
+    ).map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(response))
 }
 
@@ -116,14 +112,10 @@ enum DeleteResponse {
     Success { paths: Vec<DeleteFileResult> },
 }
 
-#[actix_web::get("/delete_download/{video_id}/{extension}")]
-pub async fn delete_download(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
-    let (video_id, audio_ext) = path.into_inner();
+#[actix_web::get("/delete_download/{video_id}")]
+pub async fn delete_download(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+    let video_id = path.into_inner();
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
-    if audio_ext != DOWNLOAD_AUDIO_EXT {
-        return Err(ApiError::invalid_audio_extension(audio_ext.as_str().to_string()).into());
-    }
     let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
     let download_state = download_cache.entry(video_id.clone()).or_default();
     let mut state = download_state.0.lock().unwrap();
@@ -132,17 +124,16 @@ pub async fn delete_download(req: HttpRequest, path: web::Path<(String, String)>
     }
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
     let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ytdlp_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let entry = select_ytdlp_entry(&db_conn, &video_id).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else { return Ok(HttpResponse::NotFound().finish()); };
-    let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::YTDLP)
-        .map_err(ApiError::internal_server)?;
+    let total_deleted = delete_ytdlp_entry(&db_conn, &video_id).map_err(ApiError::internal_server)?;
     *state = DownloadState::default();
     download_state.1.notify_all();
     drop(state);
     drop(download_state);
     drop(db_conn);
     if total_deleted == 0 { return Ok(HttpResponse::NotFound().finish()); }
-    let paths = vec![entry.audio_path, entry.infojson_path, entry.stdout_log_path, entry.stderr_log_path, entry.system_log_path];
+    let paths = vec![entry.audio_path, entry.stdout_log_path, entry.stderr_log_path, entry.system_log_path];
     let paths: Vec<String> = paths.into_iter().flatten().collect();
     let paths: Vec<DeleteFileResult> = paths.into_iter().map(|path| {
         match std::fs::remove_file(std::path::PathBuf::from(path.clone())) {
@@ -169,8 +160,7 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
     let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
     let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else { return Ok(HttpResponse::NotFound().finish()); };
-    let total_deleted = delete_worker_entry(&db_conn, &video_id, audio_ext, WorkerTable::FFMPEG)
-        .map_err(ApiError::internal_server)?;
+    let total_deleted = delete_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
     *state = TranscodeState::default();
     transcode_state.1.notify_all();
     drop(state);
@@ -204,14 +194,13 @@ pub async fn get_transcodes(req: HttpRequest) -> actix_web::Result<HttpResponse>
     Ok(HttpResponse::Ok().json(entries))
 }
 
-#[actix_web::get("/get_download/{video_id}/{extension}")]
-pub async fn get_download(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
-    let (video_id, audio_ext) = path.into_inner();
+#[actix_web::get("/get_download/{video_id}")]
+pub async fn get_download(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+    let video_id = path.into_inner();
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
     let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ytdlp_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let entry = select_ytdlp_entry(&db_conn, &video_id).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else {
         return Ok(HttpResponse::NotFound().finish());
     };
@@ -232,17 +221,10 @@ pub async fn get_transcode(req: HttpRequest, path: web::Path<(String, String)>) 
     Ok(HttpResponse::Ok().json(entry))
 }
 
-#[actix_web::get("/get_download_state/{video_id}/{extension}")]
-pub async fn get_download_state(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
-    let (video_id, audio_ext) = path.into_inner();
+#[actix_web::get("/get_download_state/{video_id}")]
+pub async fn get_download_state(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+    let video_id = path.into_inner();
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
-    if audio_ext != DOWNLOAD_AUDIO_EXT {
-        return Err(ApiError::new(
-            format!("Downloads can only have the '{0}' extension, but got '{1}'", DOWNLOAD_AUDIO_EXT.as_str(), audio_ext.as_str()),
-            StatusCode::BAD_REQUEST,
-        ).into());
-    }
     let download_cache = req.app_data::<DownloadCache>().unwrap().clone();
     if let Some(download_state) = download_cache.get(&video_id) {
         let download_state = download_state.0.lock().unwrap();
@@ -258,12 +240,6 @@ pub async fn get_transcode_state(req: HttpRequest, path: web::Path<(String, Stri
     let (video_id, audio_ext) = path.into_inner();
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
-    if audio_ext == DOWNLOAD_AUDIO_EXT {
-        return Err(ApiError::new(
-            format!("Transcodes cannot have the '{0}' extension", DOWNLOAD_AUDIO_EXT.as_str()),
-            StatusCode::BAD_REQUEST,
-        ).into());
-    }
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let transcode_cache = req.app_data::<TranscodeCache>().unwrap().clone();
     if let Some(transcode_state) = transcode_cache.get(&transcode_key) {
@@ -289,20 +265,11 @@ pub async fn get_download_link(
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let db_pool = req.app_data::<DatabasePool>().unwrap().clone();
     let db_conn = db_pool.get().map_err(ApiError::internal_server)?;
-    let audio_path = if audio_ext == DOWNLOAD_AUDIO_EXT {
-        let entry = select_ytdlp_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
-        let Some(entry) = entry else {
-            return Err(error::ErrorNotFound(format!("{0}/{1}", video_id.as_str(), audio_ext.as_str())));
-        };
-        entry.audio_path
-    } else {
-        let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
-        let Some(entry) = entry else {
-            return Err(error::ErrorNotFound(format!("{0}/{1}", video_id.as_str(), audio_ext.as_str())));
-        };
-        entry.audio_path
+    let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let Some(entry) = entry else {
+        return Err(error::ErrorNotFound(format!("{0}/{1}", video_id.as_str(), audio_ext.as_str())));
     };
-    let Some(audio_path) = audio_path else {
+    let Some(audio_path) = entry.audio_path else {
         return Err(error::ErrorNotFound(format!("{0}/{1}", video_id.as_str(), audio_ext.as_str())));
     };
     let audio_path = PathBuf::from(audio_path);
@@ -319,4 +286,3 @@ pub async fn get_download_link(
         });
     Ok(attachment)
 }
-

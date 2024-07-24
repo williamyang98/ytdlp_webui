@@ -55,8 +55,10 @@ export const DownloadProgress = {
           };
         };
         case WorkerStatus.Running: {
-          let percentage = this.progress.percentage; // 0 to 100
-          percentage = (percentage === null) ? 0 : percentage;
+          let percentage = 0;
+          if (this.progress.downloaded_bytes !== null) {
+            percentage = this.progress.downloaded_bytes / this.progress.total_bytes * 100;
+          }
           return { width: percentage, class: 'bg-primary', text: `${Math.round(percentage)}%` };
         };
       }
@@ -68,18 +70,18 @@ export const DownloadProgress = {
       if (this.progress.downloaded_bytes == null) return "Waiting for download to start";
 
       let [curr_bytes, curr_bytes_unit] = convert_to_short_standard_prefix(this.progress.downloaded_bytes);
-      let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(this.progress.size_bytes);
-      let [speed_bytes, speed_bytes_unit] = convert_to_short_standard_prefix(this.progress.speed_bytes);
-      let eta = this.progress.eta;
-      let eta_string = undefined;
-      if (eta !== null) {
-        eta_string = `ETA ${convert_dhms_to_string(eta)}`;
+      let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(this.progress.total_bytes);
+      let text_prediction = undefined;
+      if (this.progress.eta_seconds !== null) {
+        let [speed_bytes, speed_bytes_unit] = convert_to_short_standard_prefix(this.progress.speed_bytes);
+        let text_speed = `${speed_bytes.toFixed(2)}${speed_bytes_unit}B/s`;
+        let text_eta = `ETA ${convert_dhms_to_string(convert_seconds_to_dhms(this.progress.eta_seconds))}`;
+        text_prediction = `@ ${text_speed} - (${text_eta})`;
       } else {
-        eta_string = "Unknown estimated time";
+        text_prediction = "- (Unknown estimated time)";
       }
       let text_size_progress = `${curr_bytes.toFixed(2)}${curr_bytes_unit}B/${total_bytes.toFixed(2)}${total_bytes_unit}B`;
-      let text_speed = `${speed_bytes.toFixed(2)}${speed_bytes_unit}B/s`;
-      let text = `${text_size_progress} @ ${text_speed} - (${eta_string})`
+      let text = `${text_size_progress} ${text_prediction}`
       return text;
     },
     table_information() {
@@ -92,15 +94,16 @@ export const DownloadProgress = {
       table.file_cached = this.progress.file_cached;
       let elapsed_time = this.progress.end_time_unix-this.progress.start_time_unix;
       table.elapsed_time = convert_dhms_to_string(convert_seconds_to_dhms(elapsed_time));
-      if (this.progress.percentage != null) {
-        table.percentage = this.progress.percentage.toFixed(2);
+      if (this.progress.downloaded_bytes != null) {
         let [curr_bytes, curr_bytes_unit] = convert_to_short_standard_prefix(this.progress.downloaded_bytes);
-        let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(this.progress.size_bytes);
+        let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(this.progress.total_bytes);
         table.download_size = `${curr_bytes.toFixed(2)} ${curr_bytes_unit}Bytes`;
         table.total_size = `${total_bytes.toFixed(2)} ${total_bytes_unit}bytes`;
+      }
+      if (this.progress.eta_seconds !== null) {
+        table.eta = convert_dhms_to_string(convert_seconds_to_dhms(this.progress.eta_seconds));
         let [speed_bytes, speed_bytes_unit] = convert_to_short_standard_prefix(this.progress.speed_bytes);
         table.download_speed = `${speed_bytes.toFixed(2)} ${speed_bytes_unit}B/s`;
-        table.eta = convert_dhms_to_string(this.progress.eta);
       }
       return table;
     },

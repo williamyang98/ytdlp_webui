@@ -27,8 +27,8 @@ export class TranscodeApi {
     return await response.json();
   }
 
-  static get_download = async (id, ext) => {
-    let response = await fetch(`${API_URL}/get_download/${id}/${ext}`);
+  static get_download = async (id) => {
+    let response = await fetch(`${API_URL}/get_download/${id}`);
     if (!response.ok) throw response;
     return await response.json();
   }
@@ -51,14 +51,14 @@ export class TranscodeApi {
     return await response.json();
   }
 
-  static delete_download = async (id, format) => {
-    let response = await fetch(`${API_URL}/delete_download/${id}/${format}`);
+  static delete_download = async (id) => {
+    let response = await fetch(`${API_URL}/delete_download/${id}`);
     if (!response.ok) throw response;
     return await response.json();
   }
 
-  static get_download_progress = async (id, format) => {
-    let response = await fetch(`${API_URL}/get_download_state/${id}/${format}`);
+  static get_download_progress = async (id) => {
+    let response = await fetch(`${API_URL}/get_download_state/${id}`);
     if (!response.ok) throw response;
     return await response.json();
   }

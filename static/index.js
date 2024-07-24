@@ -6,7 +6,6 @@ import { TranscodeProgress } from "./fragments/transcode_progress.js";
 import { Metadata } from "./fragments/metadata.js";
 import { unix_time_to_string, extract_youtube_video_id, sanitise_to_filepath } from "./util.js";
 
-const DOWNLOAD_AUDIO_EXT = "m4a";
 const get_cache_key = (video_id, audio_ext) => `${video_id}.${audio_ext}`;
 
 export let create_app = () => createApp({
@@ -43,11 +42,9 @@ export let create_app = () => createApp({
       transcode_progress_cache: {},
       download_state_columns: [
         new Column("video_id", true, { "type": "text", ignore_case: false }, "Id", ColumnType.TEXT),
-        new Column("audio_ext", true, { "type": "text", ignore_case: false }, "Ext", ColumnType.TEXT),
         new Column("status", true, { "type": "text", ignore_case: false }, "Status", ColumnType.TEXT),
         new Column("unix_time", true, null, "Date", ColumnType.DATE, unix_time_to_string),
         new Column("audio_path", false, null, "Audio", ColumnType.LINK),
-        new Column("infojson_path", false, null, "Info", ColumnType.LINK),
         new Column("stdout_log_path", false, null, "Stdout", ColumnType.LINK),
         new Column("stderr_log_path", false, null, "Stderr", ColumnType.LINK),
         new Column("system_log_path", false, null, "System", ColumnType.LINK),
@@ -75,10 +72,9 @@ export let create_app = () => createApp({
       if (this.disable_submit) return null;
       let video_id = this.focused_transcode.video_id;
       let audio_ext = this.focused_transcode.audio_ext;
-      let key = get_cache_key(video_id, audio_ext);
       if (video_id === null) return null;
-      let cache = (audio_ext == DOWNLOAD_AUDIO_EXT) ? this.download_state_cache : this.transcode_state_cache;
-      let is_ready = cache[key]?.status == WorkerStatus.Finished;
+      let key = get_cache_key(video_id, audio_ext);
+      let is_ready = this.transcode_state_cache[key]?.status == WorkerStatus.Finished;
       if (!is_ready) return null;
       return TranscodeApi.get_download_link(video_id, audio_ext, this.focused_transcode.download_name);
     },
@@ -130,23 +126,19 @@ export let create_app = () => createApp({
       let download_name = `${sanitise_to_filepath(this.metadata.snippet.title)}.${audio_ext}`;
       this.focused_transcode = { 
         video_id, audio_ext, download_name,
-        download_key: get_cache_key(video_id, DOWNLOAD_AUDIO_EXT),
-        transcode_key: (audio_ext == DOWNLOAD_AUDIO_EXT) ? null : get_cache_key(video_id, audio_ext),
+        download_key: video_id,
+        transcode_key: get_cache_key(video_id, audio_ext),
       };
-      this.subscribe_to_download(video_id, DOWNLOAD_AUDIO_EXT);
-      if (audio_ext != DOWNLOAD_AUDIO_EXT) {
-        this.subscribe_to_transcode(video_id, audio_ext);
-      }
+      this.subscribe_to_download(video_id);
+      this.subscribe_to_transcode(video_id, audio_ext);
       // select entry from list
-      this.download_focus_key = get_cache_key(video_id, DOWNLOAD_AUDIO_EXT);
-      if (audio_ext != DOWNLOAD_AUDIO_EXT) {
-        this.transcode_focus_key = get_cache_key(video_id, audio_ext);
-      }
+      this.download_focus_key = video_id;
+      this.transcode_focus_key = get_cache_key(video_id, audio_ext);
     },
     async refresh_downloads() {
       let res = await TranscodeApi.get_downloads();
       for (let state of res) {
-        let key = get_cache_key(state.video_id, state.audio_ext);
+        let key = state.video_id;
         this.download_state_cache[key] = state;
       }
     },
@@ -158,8 +150,8 @@ export let create_app = () => createApp({
       }
     },
     async on_download_select(entry) {
-      this.download_focus_key = get_cache_key(entry.video_id, entry.audio_ext);
-      this.subscribe_to_download(entry.video_id, entry.audio_ext);
+      this.download_focus_key = entry.video_id;
+      this.subscribe_to_download(entry.video_id);
     },
     async on_transcode_select(entry) {
       this.transcode_focus_key = get_cache_key(entry.video_id, entry.audio_ext);
@@ -167,9 +159,9 @@ export let create_app = () => createApp({
     },
     async on_download_table_action({ action, entry }) {
       if (action == "delete") {
-        let res = await TranscodeApi.delete_download(entry.video_id, entry.audio_ext);
+        let res = await TranscodeApi.delete_download(entry.video_id);
         if (res.type == "success") {
-          let key = get_cache_key(entry.video_id, entry.audio_ext);
+          let key = entry.video_id;
           if (this.download_focus_key == key) this.download_focus_key = null;
           delete this.download_state_cache[key];
           delete this.download_progress_cache[key];
@@ -187,8 +179,8 @@ export let create_app = () => createApp({
         }
       }
     },
-    subscribe_to_download(video_id, audio_ext) {
-      let key = get_cache_key(video_id, audio_ext);
+    subscribe_to_download(video_id) {
+      let key = video_id;
       let timers = this.subscribed_download_progress_timers;
       if (timers[key] !== undefined) return false;
       const is_worker_finished = (status) => {
@@ -197,11 +189,11 @@ export let create_app = () => createApp({
       let timer_handle = setInterval(async () => {
         let is_finished = false;
         try {
-          let progress = await TranscodeApi.get_download_progress(video_id, audio_ext);
+          let progress = await TranscodeApi.get_download_progress(video_id);
           this.download_progress_cache[key] = progress;
           let state = this.download_state_cache[key];
           if (state?.status != progress.worker_status) {
-            let state = await TranscodeApi.get_download(video_id, audio_ext);
+            let state = await TranscodeApi.get_download(video_id);
             this.download_state_cache[key] = state;
           }
           is_finished = is_worker_finished(progress.worker_status);

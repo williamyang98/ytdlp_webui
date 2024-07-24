@@ -15,9 +15,11 @@
     <tr><td>Elasped time</td><td>{{ table_information.elapsed_time }}</td></tr>
     <template v-if="table_information.percentage !== undefined">
       <tr><td>Percentage</td><td>{{ table_information.percentage }}</td></tr>
-      <tr><td>Download speed</td><td>{{ table_information.download_speed }}</td></tr>
       <tr><td>Download size</td><td>{{ table_information.download_size }}</td></tr>
       <tr><td>Total size</td><td>{{ table_information.total_size }}</td></tr>
+    </template>
+    <template v-if="table_information.eta !== undefined">
+      <tr><td>Download speed</td><td>{{ table_information.download_speed }}</td></tr>
       <tr><td>ETA</td><td>{{ table_information.eta }}</td></tr>
     </template>
   </tbody>
