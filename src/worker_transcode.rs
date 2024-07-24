@@ -33,6 +33,7 @@ impl TranscodeKey {
 #[derive(Debug,Clone,Serialize)]
 pub struct TranscodeState {
     pub worker_status: WorkerStatus,
+    pub file_cached: bool,
     pub fail_reason: Option<String>,
     pub start_time_unix: u64,
     pub end_time_unix: u64,
@@ -50,6 +51,7 @@ impl Default for TranscodeState {
         let curr_time = get_unix_time();
         Self {
             worker_status: WorkerStatus::None,
+            file_cached: false,
             fail_reason: None,
             start_time_unix: curr_time,
             end_time_unix: curr_time,
@@ -167,7 +169,9 @@ pub fn try_start_transcode_worker(
             let audio_path = PathBuf::from(audio_path);
             if status == WorkerStatus::Finished && audio_path.exists() {
                 let transcode_state = transcode_cache.entry(key.clone()).or_default();
-                transcode_state.0.lock().unwrap().worker_status = status;
+                let mut state = transcode_state.0.lock().unwrap();
+                state.worker_status = status;
+                state.file_cached = true;
                 transcode_state.1.notify_all();
                 *is_queue_success.borrow_mut() = true;
                 return Ok(status);

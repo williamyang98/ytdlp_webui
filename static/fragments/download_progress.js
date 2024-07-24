@@ -35,7 +35,7 @@ export const DownloadProgress = {
       return false;
     },
     progress_bar() {
-      if (this.progress == null) {
+      if (this.progress == null || this.progress?.file_cached) {
         let is_cached = (this.state.status == WorkerStatus.Finished) || (this.state.status == WorkerStatus.Failed);
         return {
           width: (this.state.status == WorkerStatus.Running) ? 0 : 100,
@@ -63,7 +63,7 @@ export const DownloadProgress = {
       return { width: 100, class: 'bg-warning', text: "Unknown"};
     },
     subtitle_text() {
-      if (this.progress == null) return null;
+      if (this.progress == null || this.progress?.file_cached) return null;
       if (this.progress.worker_status == WorkerStatus.Failed) return this.progress.fail_reason;
       if (this.progress.downloaded_bytes == null) return "Waiting for download to start";
 
@@ -83,12 +83,13 @@ export const DownloadProgress = {
       return text;
     },
     table_information() {
-      if (this.progress == null) return null;
+      if (this.progress == null || this.progress?.file_cached) return null;
       let status = this.progress.worker_status;
       if ((status == WorkerStatus.None) || (status == WorkerStatus.Queued)) return null;
       let table = {};
       table.start_time = unix_time_to_string(this.progress.start_time_unix);
       table.end_time = unix_time_to_string(this.progress.end_time_unix);
+      table.file_cached = this.progress.file_cached;
       let elapsed_time = this.progress.end_time_unix-this.progress.start_time_unix;
       table.elapsed_time = convert_dhms_to_string(convert_seconds_to_dhms(elapsed_time));
       if (this.progress.percentage != null) {
