@@ -330,7 +330,7 @@ fn enqueue_download_worker(
     let Some(audio_path) = audio_path else {
         return Err(DownloadError::MissingOutputPath)
     };
-    let audio_path = PathBuf::from(audio_path);
+    let audio_path = app_config.root.join(audio_path);
     if audio_path.exists() {
         Ok(audio_path)
     } else {

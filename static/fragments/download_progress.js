@@ -67,7 +67,9 @@ export const DownloadProgress = {
     subtitle_text() {
       if (this.progress == null || this.progress?.file_cached) return null;
       if (this.progress.worker_status == WorkerStatus.Failed) return this.progress.fail_reason;
-      if (this.progress.downloaded_bytes == null) return "Waiting for download to start";
+      if (this.progress.downloaded_bytes == null) {
+        return (this.progress.worker_status == WorkerStatus.Finished) ? null : "Waiting for download to start";
+      }
 
       let [curr_bytes, curr_bytes_unit] = convert_to_short_standard_prefix(this.progress.downloaded_bytes);
       let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(this.progress.total_bytes);

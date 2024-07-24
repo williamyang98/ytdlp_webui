@@ -68,7 +68,9 @@ export const TranscodeProgress = {
     subtitle_text() {
       if (this.progress == null || this.progress?.file_cached) return null;
       if (this.progress.worker_status == WorkerStatus.Failed) return this.progress.fail_reason;
-      if (this.progress.transcode_duration_milliseconds == null) return "Waiting for transcode to start";
+      if (this.progress.transcode_duration_milliseconds == null) {
+        return (this.progress.worker_status == WorkerStatus.Finished) ? null : "Waiting for transcode to start";
+      }
       // Bitrate doesn't tell us anything useful about progress
       // let [speed_bits, speed_bits_unit] = convert_to_short_standard_prefix(this.progress.source_speed_bits);
       // let [speed_bits, speed_bits_unit] = convert_to_short_standard_prefix(this.progress.transcode_speed_bits);

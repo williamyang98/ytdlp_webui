@@ -113,6 +113,8 @@ pub enum TranscodeError {
     DownloadPathMissing,
     #[error("Missing output download file from worker: {0}")]
     DownloadFileMissing(PathBuf),
+    #[error("Copying identically formatted download to transcode failed: {0}")]
+    CopyDownloadSameFormat(std::io::Error),
     #[error("Error stored in system log")]
     LoggedFail,
     #[error("Database connection failed: {0:?}")]
@@ -254,6 +256,16 @@ fn enqueue_transcode_worker(
     let source_path = PathBuf::from(source_path);
     if !source_path.exists() {
         return Err(TranscodeError::DownloadFileMissing(source_path));
+    }
+    // If the download path is the same format as transcode path then just copy it
+    if source_path.file_name() == audio_path.file_name() {
+        let _ = std::fs::copy(source_path.clone(), audio_path.clone()).map_err(TranscodeError::CopyDownloadSameFormat)?;
+        writeln!(
+            &mut system_log_writer.lock().unwrap(), 
+            "Transcode has same format as download. Copying {0} to {1}", 
+            source_path.to_string_lossy(), audio_path.to_string_lossy(),
+        ).map_err(WorkerError::SystemWriteFail)?;
+        return Ok(audio_path);
     }
     // TODO: avoid retranscodeing file if on disk already - make this an option
     // if audio_path.exists() {
