@@ -20,7 +20,7 @@
             type="text" class="flex-grow-1" 
             v-model="transcode_request.url" 
             placeholder="Youtube URL"
-            @blur="update_request_id()"
+            @input="(ev) => update_request_id()"
             :class="{ 'form-input-invalid': transcode_request.url_error !== null }"
           />
           <select v-model="transcode_request.format">

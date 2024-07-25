@@ -129,11 +129,12 @@ export let create_app = () => createApp({
         download_key: video_id,
         transcode_key: get_cache_key(video_id, audio_ext),
       };
-      this.subscribe_to_download(video_id);
-      this.subscribe_to_transcode(video_id, audio_ext);
-      // select entry from list
       this.download_focus_key = video_id;
       this.transcode_focus_key = get_cache_key(video_id, audio_ext);
+      await Promise.all([
+        this.subscribe_to_download(video_id), 
+        this.subscribe_to_transcode(video_id, audio_ext),
+      ]);
     },
     async refresh_downloads() {
       let res = await TranscodeApi.get_downloads();
@@ -179,14 +180,14 @@ export let create_app = () => createApp({
         }
       }
     },
-    subscribe_to_download(video_id) {
+    async subscribe_to_download(video_id) {
       let key = video_id;
       let timers = this.subscribed_download_progress_timers;
       if (timers[key] !== undefined) return false;
       const is_worker_finished = (status) => {
         return (status == WorkerStatus.Failed) || (status == WorkerStatus.Finished);
       };
-      let timer_handle = setInterval(async () => {
+      const request_progress = async () => {
         let is_finished = false;
         try {
           let progress = await TranscodeApi.get_download_progress(video_id);
@@ -201,21 +202,25 @@ export let create_app = () => createApp({
           is_finished = true;
         }
         if (is_finished) {
-          clearInterval(timer_handle);
+          clearInterval(timers[key]);
           timers[key] = undefined;
         }
-      }, 1000);
-      timers[key] = timer_handle;
+        return is_finished;
+      };
+      if (!await request_progress()) {
+        timers[key] = setInterval(request_progress, 1000);
+      }
       return true;
     },
-    subscribe_to_transcode(video_id, audio_ext) {
+    async subscribe_to_transcode(video_id, audio_ext) {
       let key = get_cache_key(video_id, audio_ext);
       let timers = this.subscribed_transcode_progress_timers;
       if (timers[key] !== undefined) return false;
       const is_worker_finished = (status) => {
         return (status == WorkerStatus.Failed) || (status == WorkerStatus.Finished);
       };
-      let timer_handle = setInterval(async () => {
+      timers[key] = null;
+      const request_progress = async () => {
         let is_finished = false;
         try {
           let progress = await TranscodeApi.get_transcode_progress(video_id, audio_ext);
@@ -230,11 +235,14 @@ export let create_app = () => createApp({
           is_finished = true;
         }
         if (is_finished) {
-          clearInterval(timer_handle);
+          clearInterval(timers[key]);
           timers[key] = undefined;
         }
-      }, 1000);
-      timers[key] = timer_handle;
+        return is_finished;
+      };
+      if (!await request_progress()) {
+        timers[key] = setInterval(request_progress, 1000);
+      }
       return true;
     },
     async download_file() {
