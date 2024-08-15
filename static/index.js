@@ -1,5 +1,5 @@
 import { createApp } from "./vendor/vue.esm-browser.prod.js";
-import { TranscodeApi, YoutubeApi, WorkerStatus } from "./api.js";
+import { TranscodeApi, WorkerStatus } from "./api.js";
 import { Column, ColumnType, Table } from "./fragments/table.js";
 import { DownloadProgress } from "./fragments/download_progress.js";
 import { TranscodeProgress } from "./fragments/transcode_progress.js";
@@ -100,7 +100,7 @@ export let create_app = () => createApp({
     },
     async load_metadata() {
       this.metadata = null;
-      let res = await YoutubeApi.get_metadata(this.request_id);
+      let res = await TranscodeApi.get_metadata(this.request_id);
       if (res === null) {
         this.transcode_request.url_error = "Youtube metadata was not found";
         return;

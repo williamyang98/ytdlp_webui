@@ -2,6 +2,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Condvar};
 use thiserror::Error;
 use threadpool::ThreadPool;
+use dashmap::DashMap;
+use crate::{
+    database::{DatabasePool, VideoId, setup_database},
+    metadata::{MetadataCache, Metadata},
+    worker_download::{DownloadCache, DownloadState},
+    worker_transcode::{TranscodeCache, TranscodeKey, TranscodeState},
+};
 
 pub type WorkerThreadPool = Arc<Mutex<ThreadPool>>;
 pub type WorkerCacheEntry<T> = Arc<(Mutex<T>, Condvar)>;
@@ -59,5 +66,35 @@ impl AppConfig {
         std::fs::create_dir_all(&self.download)?;
         std::fs::create_dir_all(&self.transcode)?;
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub app_config: Arc<AppConfig>,
+    pub db_pool: DatabasePool,
+    pub worker_thread_pool: WorkerThreadPool,
+    pub download_cache: DownloadCache,
+    pub transcode_cache: TranscodeCache,
+    pub metadata_cache: MetadataCache,
+}
+
+impl AppState {
+    pub fn new(app_config: AppConfig, total_transcode_threads: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        let db_manager = r2d2_sqlite::SqliteConnectionManager::file(app_config.data.join("index.db"));
+        let db_pool = DatabasePool::new(db_manager)?;
+        setup_database(db_pool.get()?)?;
+        let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_transcode_threads)));
+        let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, WorkerCacheEntry<DownloadState>>::new());
+        let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, WorkerCacheEntry<TranscodeState>>::new());
+        let metadata_cache: MetadataCache = Arc::new(DashMap::<VideoId, Arc<Metadata>>::new());
+        Ok(Self {
+            app_config: Arc::new(app_config),
+            db_pool, 
+            worker_thread_pool,
+            download_cache,
+            transcode_cache,
+            metadata_cache,
+        })
     }
 }

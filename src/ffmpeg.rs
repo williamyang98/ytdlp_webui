@@ -138,6 +138,9 @@ const TIME_REGEX: &str = r"(?:\d+:)*\d+(?:\.\d+)?";
 
 #[derive(Clone,Copy,Debug,Default)]
 pub struct TranscodeProgress {
+    pub frame: Option<usize>,
+    pub fps: Option<f32>,
+    pub q_factor: Option<f32>,
     pub size_bytes: Option<usize>,
     pub total_time_transcoded: Option<Time>,
     pub speed_bits: Option<usize>,
@@ -160,7 +163,7 @@ pub enum ParsedStderrLine {
 pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
     lazy_static! {
         static ref PROGRESS_REGEX: Regex = Regex::new(format!(
-            r"size\s*=\s*(\d+)({0})\s+time\s*=\s*({1})\s+bitrate\s*=\s*({2})({3})\/s\s+speed\s*=\s*({2})\s*x",
+            r"frame\s*=\s*(\d+)\s+fps\s*=\s*({2})\s+q\s*=\s*({2})\s+size\s*=\s*(\d+)({0})\s+time\s*=\s*({1})\s+bitrate\s*=\s*({2})({3})\/s\s+speed\s*=\s*({2})\s*x",
             BYTES_REGEX, TIME_REGEX, FLOAT32_REGEX, BITS_LONG_REGEX,
         ).as_str()).unwrap();
         static ref SOURCE_INFO_REGEX: Regex = Regex::new(format!(
@@ -170,25 +173,31 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
     }
     let line = line.trim();
     if let Some(captures) = PROGRESS_REGEX.captures(line) {
+        let frame: Option<usize> = captures.get(1).and_then(|m| m.as_str().parse().ok());
+        let fps: Option<f32> = captures.get(2).and_then(|m| m.as_str().parse().ok());
+        let q_factor: Option<f32> = captures.get(3).and_then(|m| m.as_str().parse().ok());
         let size_bytes = {
-            let value: Option<u32> = captures.get(1).and_then(|m| m.as_str().parse().ok());
-            let unit: Option<SizeBytes> = captures.get(2).and_then(|m| m.as_str().try_into().ok());
+            let value: Option<u32> = captures.get(4).and_then(|m| m.as_str().parse().ok());
+            let unit: Option<SizeBytes> = captures.get(5).and_then(|m| m.as_str().try_into().ok());
             match (value, unit) {
                 (Some(value), Some(unit)) => Some(value as usize * unit.to_bytes()),
                 _ => None,
             }
         };
-        let total_time_transcoded: Option<Time> = captures.get(3).and_then(|m| Time::try_from_str(m.as_str()).ok());
+        let total_time_transcoded: Option<Time> = captures.get(6).and_then(|m| Time::try_from_str(m.as_str()).ok());
         let speed_bits = {
-            let value: Option<f32> = captures.get(4).and_then(|m| m.as_str().parse().ok());
-            let unit: Option<SizeBits> = captures.get(5).and_then(|m| SizeBits::try_from_long(m.as_str()));
+            let value: Option<f32> = captures.get(7).and_then(|m| m.as_str().parse().ok());
+            let unit: Option<SizeBits> = captures.get(8).and_then(|m| SizeBits::try_from_long(m.as_str()));
             match (value, unit) {
                 (Some(value), Some(unit)) => Some((value * unit.to_bits() as f32) as usize),
                 _ => None,
             }
         };
-        let speed_factor: Option<f32> = captures.get(6).and_then(|m| m.as_str().parse().ok());
+        let speed_factor: Option<f32> = captures.get(9).and_then(|m| m.as_str().parse().ok());
         let result = TranscodeProgress {
+            frame,
+            fps,
+            q_factor,
             size_bytes,
             total_time_transcoded,
             speed_bits,

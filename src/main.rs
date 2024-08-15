@@ -1,14 +1,8 @@
-use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use actix_web::{middleware, web, App, HttpServer};
 use clap::Parser;
-use dashmap::DashMap;
-use threadpool::ThreadPool;
 use ytdlp_server::{
-    app::{AppConfig, WorkerThreadPool, WorkerCacheEntry},
-    database::{DatabasePool, VideoId, setup_database},
-    worker_download::{DownloadCache, DownloadState},
-    worker_transcode::{TranscodeCache, TranscodeKey, TranscodeState},
+    app::{AppConfig, AppState},
     routes,
 };
 
@@ -42,6 +36,9 @@ struct Args {
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "INFO");
+    }
     env_logger::init();
 
     let total_transcode_threads: usize = match args.total_transcode_threads {
@@ -56,21 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = args.ytdlp_binary_path { app_config.ytdlp_binary = PathBuf::from(path); }
     if let Some(path) = args.ffmpeg_binary_path { app_config.ffmpeg_binary = PathBuf::from(path); }
     app_config.seed_directories()?;
-    let db_manager = r2d2_sqlite::SqliteConnectionManager::file(app_config.root.join("index.db"));
-    let db_pool = DatabasePool::new(db_manager)?;
-    setup_database(db_pool.get()?)?;
-    let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, WorkerCacheEntry<DownloadState>>::new());
-    let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, WorkerCacheEntry<TranscodeState>>::new());
-    let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_transcode_threads)));
+    let app_state = AppState::new(app_config, total_transcode_threads)?;
     // start server
     const API_PREFIX: &str = "/api/v1";
     HttpServer::new(move || {
         App::new()
-            .app_data(app_config.clone())
-            .app_data(db_pool.clone())
-            .app_data(worker_thread_pool.clone())
-            .app_data(download_cache.clone())
-            .app_data(transcode_cache.clone())
+            .app_data(app_state.clone())
             .service(web::scope(API_PREFIX)
                 .service(routes::request_transcode)
                 .service(routes::delete_transcode)
@@ -82,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .service(routes::get_download_state)
                 .service(routes::get_transcode_state)
                 .service(routes::get_download_link)
+                .service(routes::get_metadata)
             )
             .service(actix_files::Files::new("/data", "./data/").show_files_listing())
             .service(actix_files::Files::new("/", "./static/").index_file("index.html"))

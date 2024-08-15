@@ -15,6 +15,7 @@ use crate::database::{
     select_ytdlp_entry,
 };
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
+use crate::metadata::{Metadata, Thumbnail};
 use crate::worker_download::DownloadCache;
 use crate::ffmpeg;
 
@@ -75,6 +76,11 @@ fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
 impl TranscodeState {
     pub fn update_from_progress(&mut self, progress: ffmpeg::TranscodeProgress) {
         self.end_time_unix = get_unix_time();
+        // NOTE: we get multiple progress stats including from thumbnail which makes no sense
+        //       since we bind thumbnail to source 1, we can ignore this
+        if progress.frame != Some(0) {
+            return;
+        }
         update_field(&mut self.transcode_size_bytes, progress.size_bytes);
         update_field(&mut self.transcode_duration_milliseconds , progress.total_time_transcoded.map(|t| t.to_milliseconds()));
         update_field(&mut self.transcode_speed_bits, progress.speed_bits);
@@ -83,6 +89,15 @@ impl TranscodeState {
 
     pub fn update_from_source_info(&mut self, info: ffmpeg::TranscodeSourceInfo) {
         self.end_time_unix = get_unix_time();
+        // NOTE: we specify multiple sources including thumbnail which gives dodgy info
+        //       we check for this by only updating from the longest duration source info
+        if let Some(old_duration) = self.source_duration_milliseconds {
+            if let Some(new_duration) = info.duration.map(|t| t.to_milliseconds()) {
+                if new_duration < old_duration {
+                    return;
+                }
+            }
+        }
         update_field(&mut self.source_duration_milliseconds, info.duration.map(|t| t.to_milliseconds()));
         update_field(&mut self.source_start_time_milliseconds, info.start_time.map(|t| t.to_milliseconds()));
         update_field(&mut self.source_speed_bits, info.speed_bits);
@@ -125,8 +140,9 @@ pub enum TranscodeError {
 
 pub fn try_start_transcode_worker(
     key: TranscodeKey,
-    download_cache: DownloadCache, transcode_cache: TranscodeCache, app_config: AppConfig, 
+    download_cache: DownloadCache, transcode_cache: TranscodeCache, app_config: Arc<AppConfig>, 
     db_pool: DatabasePool, worker_thread_pool: WorkerThreadPool,
+    metadata: Option<Arc<Metadata>>,
 ) -> Result<WorkerStatus, TranscodeStartError> {
     // check if transcode in progress (cache hit)
     {
@@ -198,6 +214,7 @@ pub fn try_start_transcode_worker(
         let res = enqueue_transcode_worker(
             key.clone(), download_cache.clone(), transcode_cache.clone(), 
             app_config.clone(), db_pool.clone(), system_log_writer.clone(),
+            metadata,
         );
         if let Err(ref err) = res {
             let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
@@ -227,7 +244,8 @@ pub fn try_start_transcode_worker(
 
 fn enqueue_transcode_worker(
     key: TranscodeKey, download_cache: DownloadCache, transcode_cache: TranscodeCache,
-    app_config: AppConfig, db_pool: DatabasePool, system_log_writer: Arc<Mutex<impl Write>>,
+    app_config: Arc<AppConfig>, db_pool: DatabasePool, system_log_writer: Arc<Mutex<impl Write>>,
+    metadata: Option<Arc<Metadata>>,
 ) -> Result<PathBuf, TranscodeError> {
     let filename = format!("{0}.{1}", key.video_id.as_str(), key.audio_ext.as_str());
     let audio_path = app_config.transcode.join(filename.as_str());
@@ -257,16 +275,17 @@ fn enqueue_transcode_worker(
     if !source_path.exists() {
         return Err(TranscodeError::DownloadFileMissing(source_path));
     }
+    // NOTE: Don't copy since we do extra stuff like embed thumbnail and video metadata
     // If the download path is the same format as transcode path then just copy it
-    if source_path.file_name() == audio_path.file_name() {
-        let _ = std::fs::copy(source_path.clone(), audio_path.clone()).map_err(TranscodeError::CopyDownloadSameFormat)?;
-        writeln!(
-            &mut system_log_writer.lock().unwrap(), 
-            "Transcode has same format as download. Copying {0} to {1}", 
-            source_path.to_string_lossy(), audio_path.to_string_lossy(),
-        ).map_err(WorkerError::SystemWriteFail)?;
-        return Ok(audio_path);
-    }
+    // if source_path.file_name() == audio_path.file_name() {
+    //     let _ = std::fs::copy(source_path.clone(), audio_path.clone()).map_err(TranscodeError::CopyDownloadSameFormat)?;
+    //     writeln!(
+    //         &mut system_log_writer.lock().unwrap(), 
+    //         "Transcode has same format as download. Copying {0} to {1}", 
+    //         source_path.to_string_lossy(), audio_path.to_string_lossy(),
+    //     ).map_err(WorkerError::SystemWriteFail)?;
+    //     return Ok(audio_path);
+    // }
     // TODO: avoid retranscodeing file if on disk already - make this an option
     // if audio_path.exists() {
     //     *is_transcoded.borrow_mut() = true;
@@ -276,13 +295,57 @@ fn enqueue_transcode_worker(
     let stdout_log_path = app_config.transcode.join(format!("{}.stdout.log", key.as_str()));
     let stderr_log_path = app_config.transcode.join(format!("{}.stderr.log", key.as_str()));
     // spawn process
-    let process_res = Command::new(app_config.ffmpeg_binary.clone())
-        .args([
-            "-i", source_path.to_str().unwrap(),
+    let process_args = {
+        let mut args = Vec::<String>::new();
+        let push_args = |args: &mut Vec<String>, values: &[&str]| {
+            args.extend(values.iter().map(|&s| s.to_owned()));
+        };
+        let push_metadata = |args: &mut Vec<String>, field: &str, value: &str| {
+            args.extend(["-metadata".to_owned(), format!("{0}={1}", field, value)]);
+        };
+        push_args(&mut args, &["-i", source_path.to_str().unwrap()]);
+        let can_embed_thumbnail = &[AudioExtension::MP3].contains(&key.audio_ext);
+        let thumbnail = || -> Option<Thumbnail> {
+            if !can_embed_thumbnail {
+                return None;
+            }
+            let metadata = metadata.clone()?;
+            let item = metadata.items.first()?;
+            let mut thumbnails: Vec<Thumbnail> = item.snippet.thumbnails.values().cloned().collect();
+            thumbnails.sort_by_key(|thumbnail| thumbnail.width * thumbnail.height);
+            thumbnails.last().cloned()
+        } ();
+        if let Some(ref thumbnail) = thumbnail {
+            push_args(&mut args, &["-i", thumbnail.url.as_str()]);
+        }
+        push_args(&mut args, &["-map", "0:a"]);
+        if thumbnail.is_some() {
+            push_args(&mut args, &["-map", "1"]);
+        }
+        push_metadata(&mut args, "video_id", key.video_id.as_str());
+        if let Some(metadata) = metadata {
+            if let Some(item) = metadata.items.first() {
+                push_metadata(&mut args, "title", item.snippet.title.as_str());
+                push_metadata(&mut args, "artist", item.snippet.channel_title.as_str());
+                push_metadata(&mut args, "description", item.snippet.description.as_str());
+                push_metadata(&mut args, "published_at", item.snippet.published_at.as_str());
+                push_args(&mut args, &["-id3v2_version", "3"]);
+                let mut thumbnails: Vec<(&String, &Thumbnail)> = item.snippet.thumbnails.iter().collect();
+                thumbnails.sort_by_key(|(_, thumbnail)| thumbnail.width * thumbnail.height);
+            }
+        }
+        if thumbnail.is_some() {
+            push_args(&mut args, &["-disposition:0", "attached_pic"]);
+        }
+        push_args(&mut args, &[
             "-threads", "0",
             "-progress", "-", "-y",
             audio_path.to_str().unwrap(),
-        ])
+        ]);
+        args
+    };
+    let process_res = Command::new(app_config.ffmpeg_binary.clone())
+        .args(process_args.as_slice())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

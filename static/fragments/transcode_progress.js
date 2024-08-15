@@ -82,23 +82,30 @@ export const TranscodeProgress = {
       let remaining_percentage = 1 - percentage;
       let eta_seconds = (time_elapsed_seconds/percentage)*remaining_percentage;
 
+      // NOTE: This is now garbage because the transcode size gives erroneous values when embedding thumbnail
       // estimate size of final file
-      let estimated_total_bytes = this.progress.transcode_size_bytes/percentage;
-      let [curr_bytes, curr_bytes_unit] = convert_to_short_standard_prefix(this.progress.transcode_size_bytes);
-      let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(estimated_total_bytes);
-
+      // let estimated_total_bytes = this.progress.transcode_size_bytes/percentage;
+      // let [curr_bytes, curr_bytes_unit] = convert_to_short_standard_prefix(this.progress.transcode_size_bytes);
+      // let [total_bytes, total_bytes_unit] = convert_to_short_standard_prefix(estimated_total_bytes);
+      //
       // estimate speed of transcode
-      let estimated_speed_bytes = (time_elapsed_seconds) == 0 ? 0 : this.progress.transcode_size_bytes / time_elapsed_seconds;
-      let [speed_bytes, speed_bytes_unit] = convert_to_short_standard_prefix(estimated_speed_bytes);
+      // let estimated_speed_bytes = (time_elapsed_seconds == 0) ? 0 : this.progress.transcode_size_bytes / time_elapsed_seconds;
+      // let [speed_bytes, speed_bytes_unit] = convert_to_short_standard_prefix(estimated_speed_bytes);
+  
+      // Estimate speed of transcode in time per second
+      let estimated_speed_time = (time_elapsed_seconds == 0) ? 0 : this.progress.transcode_duration_milliseconds / time_elapsed_seconds;
+      let estimated_speed_time_str = convert_dhms_to_string(convert_seconds_to_dhms(estimated_speed_time/1000));
 
       let eta_string = `ETA ${convert_dhms_to_string(convert_seconds_to_dhms(eta_seconds))}`;
       let curr_time_string = convert_dhms_to_string(convert_seconds_to_dhms(this.progress.transcode_duration_milliseconds/1000));
       let total_time_string = convert_dhms_to_string(convert_seconds_to_dhms(this.progress.source_duration_milliseconds/1000));
 
       let text_time_progress = `${curr_time_string}/${total_time_string}`;
-      let text_size_progress = `${curr_bytes.toFixed(2)}${curr_bytes_unit}B/${total_bytes.toFixed(2)}${total_bytes_unit}B`;
-      let text_speed = `${speed_bytes.toFixed(2)}${speed_bytes_unit}B/s`;
-      let text = `${text_time_progress} - ${text_size_progress} @ ${text_speed} (${eta_string})`
+      // let text_size_progress = `${curr_bytes.toFixed(2)}${curr_bytes_unit}B/${total_bytes.toFixed(2)}${total_bytes_unit}B`;
+      // let text_speed = `${speed_bytes.toFixed(2)}${speed_bytes_unit}B/s`;
+      // let text = `${text_time_progress} - ${text_size_progress} @ ${text_speed} (${eta_string})`
+      let text_speed = `${estimated_speed_time_str}/s`;
+      let text = `${text_time_progress} @ ${text_speed} (${eta_string})`
       return text;
     },
     table_information() {

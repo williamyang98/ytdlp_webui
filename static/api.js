@@ -68,19 +68,13 @@ export class TranscodeApi {
     if (!response.ok) throw response;
     return await response.json();
   }
-}
 
-export class YoutubeApi {
   static get_metadata_link = (id) => {
-    const URL = "https://www.googleapis.com/youtube/v3/videos";
-    const PARTS = "snippet,contentDetails"
-    const API_KEY = "AIzaSyDkmFSz9gH9slSnonGjs8TZEjtAKS4e9cg";
-    let url = `${URL}?part=${PARTS}&id=${id}&key=${API_KEY}`;
-    return url;
+    return `${API_URL}/get_metadata/${id}`;
   }
+
   static get_metadata = async (id) => {
-    let url = this.get_metadata_link(id);
-    let response = await fetch(url);
+    let response = await fetch(`${API_URL}/get_metadata/${id}`);
     if (!response.ok) throw response;
     let data = await response.json();
     if (data.items.length === 0) {

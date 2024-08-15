@@ -96,7 +96,7 @@ pub enum DownloadError {
 }
 
 pub fn try_start_download_worker(
-    video_id: VideoId, download_cache: DownloadCache, app_config: AppConfig,
+    video_id: VideoId, download_cache: DownloadCache, app_config: Arc<AppConfig>,
     db_pool: DatabasePool, worker_thread_pool: WorkerThreadPool,
 ) -> Result<WorkerStatus, DownloadStartError> {
     // check if download in progress (cache hit)
@@ -195,7 +195,7 @@ pub fn try_start_download_worker(
 }
 
 fn enqueue_download_worker(
-    video_id: VideoId, download_cache: DownloadCache, app_config: AppConfig, db_pool: DatabasePool,
+    video_id: VideoId, download_cache: DownloadCache, app_config: Arc<AppConfig>, db_pool: DatabasePool,
     system_log_writer: Arc<Mutex<impl Write>>,
 ) -> Result<PathBuf, DownloadError> {
     // logging files

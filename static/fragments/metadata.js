@@ -1,4 +1,4 @@
-import { YoutubeApi } from "../api.js";
+import { TranscodeApi } from "../api.js";
 import { youtube_duration_string_to_dhms, convert_dhms_to_string } from "../util.js";
 
 export const Metadata = {
@@ -7,7 +7,7 @@ export const Metadata = {
   },
   computed: {
     metadata_link() {
-      return YoutubeApi.get_metadata_link(this.metadata.id);
+      return TranscodeApi.get_metadata_link(this.metadata.id);
     },
     video_link() {
       return `https://youtube.com/watch?v=${this.metadata.id}`;

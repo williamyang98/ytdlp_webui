@@ -1,6 +1,7 @@
 pub mod app;
 pub mod database;
 pub mod ffmpeg;
+pub mod metadata;
 pub mod routes;
 pub mod util;
 pub mod worker_download;

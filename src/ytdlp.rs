@@ -8,7 +8,6 @@ use serde::Serialize;
 pub fn get_ytdlp_arguments<'a>(url: &'a str, ffmpeg_binary_path: &'a str, output_format: &'a str) -> impl IntoIterator<Item=impl AsRef<OsStr> + 'a> {
     [
         url,
-        "--no-continue", // override existing files
         "--extract-audio",
         "--format", "bestaudio",
         "--no-continue", // override existing files
