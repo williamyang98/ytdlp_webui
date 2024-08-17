@@ -76,11 +76,19 @@ fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
 impl TranscodeState {
     pub fn update_from_progress(&mut self, progress: ffmpeg::TranscodeProgress) {
         self.end_time_unix = get_unix_time();
-        // NOTE: we get multiple progress stats including from thumbnail which makes no sense
-        //       since we bind thumbnail to source 1, we can ignore this
-        if progress.frame != Some(0) {
+        // NOTE: On linux the frame number is sometimes 1 for the audio stream so this check doesn't make sense
+        //       Instead we only update the progress if the transcode duration is greater than the old duration
+        // if progress.frame != Some(0) {
+        //     return;
+        // }
+        let Some(new_duration) = progress.total_time_transcoded.map(|t| t.to_milliseconds()) else {
             return;
-        }
+        };
+        if let Some(old_duration) = self.transcode_duration_milliseconds {
+            if old_duration > new_duration {
+                return;
+            }
+        };
         update_field(&mut self.transcode_size_bytes, progress.size_bytes);
         update_field(&mut self.transcode_duration_milliseconds , progress.total_time_transcoded.map(|t| t.to_milliseconds()));
         update_field(&mut self.transcode_speed_bits, progress.speed_bits);
