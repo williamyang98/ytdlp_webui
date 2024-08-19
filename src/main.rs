@@ -74,7 +74,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .service(actix_files::Files::new("/data", "./data/").show_files_listing())
             .service(actix_files::Files::new("/", "./static/").index_file("index.html"))
-            .wrap(middleware::Compress::default())
+            // NOTE: There is little benefit to using compress middleware when serving audio files
+            // since they are already extremely compressed. Additionally it also ends up removing
+            // the Content-Length header from the downloads since the file is being streamed.
+            // This has the effect of removing any progress bar on the download which is a bad experience.
+            // .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
     })
     .bind((args.url, args.port))?
