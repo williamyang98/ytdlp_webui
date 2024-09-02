@@ -84,6 +84,7 @@ pub fn parse_stdout_line(line: &str) -> Option<ParsedStdoutLine> {
 pub enum ParsedStderrLine {
     UsageError(String),
     MissingVideo(String),
+    ExtractPath(String),
 }
 
 pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
@@ -93,6 +94,10 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
         ).unwrap();
         static ref MISSING_VIDEO_REGEX: Regex = Regex::new(format!(
             r"ERROR:\s+\[youtube\]\s+({0}): Video unavailable", 
+            YOUTUBE_ID_REGEX,
+        ).as_str()).unwrap();
+        static ref EXTRACT_PATH_REGEX: Regex = Regex::new(format!(
+            r"\[ExtractAudio\]\s*Destination:\s*({0})", 
             YOUTUBE_ID_REGEX,
         ).as_str()).unwrap();
     }
@@ -105,6 +110,11 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
     if let Some(captures) = MISSING_VIDEO_REGEX.captures(line) {
         if let Some(id) = captures.get(1).map(|m| m.as_str()) {
             return Some(ParsedStderrLine::MissingVideo(id.to_owned()));
+        }
+    }
+    if let Some(captures) = EXTRACT_PATH_REGEX.captures(line) {
+        if let Some(id) = captures.get(1).map(|m| m.as_str()) {
+            return Some(ParsedStderrLine::ExtractPath(id.to_owned()));
         }
     }
     None

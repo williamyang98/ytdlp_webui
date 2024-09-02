@@ -247,7 +247,7 @@ fn enqueue_download_worker(
         }
         move || -> Result<Option<String>, DownloadError> {
             let mut line = String::new();
-            let mut output_path = None;
+            let mut download_path = None;
             loop {
                 match stdout_reader.read_line(&mut line) {
                     Err(_) => break,
@@ -263,12 +263,12 @@ fn enqueue_download_worker(
                         download_state.0.lock().unwrap().update_from_ytdlp(progress);
                     },
                     Some(ytdlp::ParsedStdoutLine::OutputPath(path)) => {
-                        output_path = Some(path);
+                        download_path = Some(path);
                     },
                 }
                 line.clear();
             }
-            Ok(output_path)
+            Ok(download_path)
         }
     });
     let stderr_thread = thread::spawn({
@@ -286,6 +286,7 @@ fn enqueue_download_worker(
         }
         move || {
             let mut line = String::new();
+            let mut extract_path = None;
             loop {
                 match stderr_reader.read_line(&mut line) {
                     Err(_) => break,
@@ -297,15 +298,18 @@ fn enqueue_download_worker(
                     None => (),
                     Some(ytdlp::ParsedStderrLine::MissingVideo(_)) => return Err(DownloadError::InvalidVideoId),
                     Some(ytdlp::ParsedStderrLine::UsageError(message)) => return Err(DownloadError::UsageError(message)),
+                    Some(ytdlp::ParsedStderrLine::ExtractPath(path)) => {
+                        extract_path = Some(path);
+                    },
                 }
                 line.clear();
             }
-            Ok(())
+            Ok(extract_path)
         }
     });
     // shutdown threads
-    let audio_path = stdout_thread.join().map_err(WorkerError::StdoutThreadJoin)??;
-    stderr_thread.join().map_err(WorkerError::StderrThreadJoin)??;
+    let download_path = stdout_thread.join().map_err(WorkerError::StdoutThreadJoin)??;
+    let extract_path = stderr_thread.join().map_err(WorkerError::StderrThreadJoin)??;
     // shutdown process
     match process.try_wait() {
         Ok(None) => {},
@@ -327,6 +331,8 @@ fn enqueue_download_worker(
             }
         },
     }
+    // NOTE: Audio extractor for yt-dlp might not extract anything if the file extension remains the same
+    let audio_path = extract_path.or(download_path);
     let Some(audio_path) = audio_path else {
         return Err(DownloadError::MissingOutputPath)
     };
