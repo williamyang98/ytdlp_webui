@@ -48,7 +48,7 @@ jobs:
       run: ./scripts/download_win32.sh
 
     - name: Upload files 
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ytdlp_webui_windows_x86
         path: ${{github.workspace}}/${{env.PACKAGE_DIR}}

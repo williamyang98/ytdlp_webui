@@ -83,11 +83,11 @@ pub enum DownloadError {
     UsageError(String),
     #[error("Invalid video id")]
     InvalidVideoId,
-    #[error("Missing output path")]
+    #[error("ytdlp failed to provide an output path (consider updating ytdlp?)")]
     MissingOutputPath,
-    #[error("Missing output download file: {0}")]
+    #[error("ytdlp download file is missing: {0} (consider updating ytdlp?)")]
     MissingOutputFile(PathBuf),
-    #[error("Error stored in system log")]
+    #[error("Unknown error stored in system log")]
     LoggedFail,
     #[error("Database connection failed: {0:?}")]
     DatabaseConnection(#[from] r2d2::Error),
