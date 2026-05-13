@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 use actix_web::{
     error, 
     http::{header::{ContentDisposition, ContentType, DispositionParam, DispositionType}, StatusCode}, 
@@ -12,7 +11,7 @@ use crate::database::{
     delete_ffmpeg_entry, select_ffmpeg_entries, select_ffmpeg_entry,
     delete_ytdlp_entry, select_ytdlp_entries, select_ytdlp_entry,
 };
-use crate::metadata::{get_metadata_url, MetadataCache, Metadata};
+use crate::metadata::get_metadata_from_cache;
 use crate::worker_download::{try_start_download_worker, DownloadState};
 use crate::worker_transcode::{try_start_transcode_worker, TranscodeState, TranscodeKey};
 use crate::app::AppState;
@@ -293,15 +292,3 @@ pub async fn get_metadata(req: HttpRequest, path: web::Path<String>) -> actix_we
     Ok(HttpResponse::Ok().json(metadata.as_ref()))
 }
 
-async fn get_metadata_from_cache(video_id: VideoId, cache: MetadataCache) -> Result<Arc<Metadata>, Box<dyn std::error::Error>> {
-    if let Some(metadata) = cache.get(&video_id) {
-        return Ok(metadata.clone());
-    }
-    let metadata_url = get_metadata_url(video_id.as_str());
-    let response = reqwest::get(metadata_url).await?;
-    let metadata = response.text().await?;
-    let metadata: Metadata = serde_json::from_str(metadata.as_str())?;
-    let metadata = Arc::new(metadata);
-    cache.insert(video_id, metadata.clone());
-    Ok(metadata)
-}

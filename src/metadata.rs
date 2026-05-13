@@ -75,3 +75,16 @@ pub struct Metadata {
     #[serde(rename="pageInfo")]
     pub page_info: PageInfo,
 }
+
+pub async fn get_metadata_from_cache(video_id: VideoId, cache: MetadataCache) -> Result<Arc<Metadata>, Box<dyn std::error::Error>> {
+    if let Some(metadata) = cache.get(&video_id) {
+        return Ok(metadata.clone());
+    }
+    let metadata_url = get_metadata_url(video_id.as_str());
+    let response = reqwest::get(metadata_url).await?;
+    let metadata = response.text().await?;
+    let metadata: Metadata = serde_json::from_str(metadata.as_str())?;
+    let metadata = Arc::new(metadata);
+    cache.insert(video_id, metadata.clone());
+    Ok(metadata)
+}
