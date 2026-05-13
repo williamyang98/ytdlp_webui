@@ -10,7 +10,8 @@ use serde::Serialize;
 use thiserror::Error;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
 use crate::database::{
-    DatabasePool, VideoId, WorkerStatus,
+    DatabasePool, DatabaseError, DatabasePoolError,
+    VideoId, WorkerStatus,
     insert_ytdlp_entry, select_ytdlp_entry, select_and_update_ytdlp_entry,
 };
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
@@ -70,9 +71,9 @@ pub type DownloadCache = Arc<DashMap<VideoId, WorkerCacheEntry<DownloadState>>>;
 #[derive(Debug,Error)]
 pub enum DownloadStartError {
     #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] r2d2::Error),
-    #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] rusqlite::Error),
+    DatabaseConnection(#[from] DatabasePoolError),
+    #[error("Database error: {0:?}")]
+    DatabaseExecute(#[from] DatabaseError),
 }
 
 #[derive(Debug,Error)]
@@ -90,9 +91,9 @@ pub enum DownloadError {
     #[error("Unknown error stored in system log")]
     LoggedFail,
     #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] r2d2::Error),
+    DatabaseConnection(#[from] DatabasePoolError),
     #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] rusqlite::Error),
+    DatabaseExecute(#[from] DatabaseError),
 }
 
 pub fn try_start_download_worker(
@@ -126,9 +127,9 @@ pub fn try_start_download_worker(
         }
     });
     {
-        let db_conn = db_pool.get()?;
+        let mut db_conn = db_pool.get()?;
         // check if download finished on disk (cache miss due to reset)
-        let entry = select_ytdlp_entry(&db_conn, &video_id)?;
+        let entry = select_ytdlp_entry(&mut db_conn, &video_id)?;
         if let Some(entry) = entry {
             if let Some(audio_path) = entry.audio_path {
                 let status = entry.status;
@@ -145,7 +146,7 @@ pub fn try_start_download_worker(
             }
         }
         // start download worker
-        let _ = insert_ytdlp_entry(&db_conn, &video_id)?;
+        let _ = insert_ytdlp_entry(&mut db_conn, &video_id)?;
     }
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching download process: {0}", video_id.as_str());
@@ -158,8 +159,8 @@ pub fn try_start_download_worker(
                 return;
             },
         };
-        if let Ok(db_conn) = db_pool.get() {
-            select_and_update_ytdlp_entry(&db_conn, &video_id, |entry| {
+        if let Ok(mut db_conn) = db_pool.get() {
+            select_and_update_ytdlp_entry(&mut db_conn, &video_id, |entry| {
                 entry.system_log_path = Some(system_log_path.to_str().unwrap().to_owned());
             }).unwrap();
         }
@@ -177,8 +178,8 @@ pub fn try_start_download_worker(
             Err(err) => (None, WorkerStatus::Failed, Some(err)),
         };
         {
-            let db_conn = db_pool.get().unwrap();
-            let _ = select_and_update_ytdlp_entry(&db_conn, &video_id, |entry| {
+            let mut db_conn = db_pool.get().unwrap();
+            let _ = select_and_update_ytdlp_entry(&mut db_conn, &video_id, |entry| {
                 entry.audio_path = audio_path.map(|p| p.to_str().unwrap().to_string());
                 entry.status = worker_status;
             }).unwrap();
@@ -228,8 +229,8 @@ fn enqueue_download_worker(
         download_state.1.notify_all();
     }
     {
-        let db_conn = db_pool.get()?;
-        let _ = select_and_update_ytdlp_entry(&db_conn, &video_id, |entry| entry.status = WorkerStatus::Running)?;
+        let mut db_conn = db_pool.get()?;
+        let _ = select_and_update_ytdlp_entry(&mut db_conn, &video_id, |entry| entry.status = WorkerStatus::Running)?;
     }
     // scrape stdout and stderr
     let stdout_thread = thread::spawn({
@@ -240,8 +241,8 @@ fn enqueue_download_worker(
         let stdout_log_file = std::fs::File::create(stdout_log_path.clone()).map_err(WorkerError::StdoutLogCreate)?;
         let mut stdout_log_writer = BufWriter::new(stdout_log_file);
         {
-            let db_conn = db_pool.get()?;
-            let _ = select_and_update_ytdlp_entry(&db_conn, &video_id, |entry| {
+            let mut db_conn = db_pool.get()?;
+            let _ = select_and_update_ytdlp_entry(&mut db_conn, &video_id, |entry| {
                 entry.stdout_log_path = Some(stdout_log_path.to_str().unwrap().to_owned());
             })?;
         }
@@ -279,8 +280,8 @@ fn enqueue_download_worker(
         let stderr_log_file = std::fs::File::create(stderr_log_path.clone()).map_err(WorkerError::StderrLogCreate)?;
         let mut stderr_log_writer = BufWriter::new(stderr_log_file);
         {
-            let db_conn = db_pool.get()?;
-            let _ = select_and_update_ytdlp_entry(&db_conn, &video_id, |entry| {
+            let mut db_conn = db_pool.get()?;
+            let _ = select_and_update_ytdlp_entry(&mut db_conn, &video_id, |entry| {
                 entry.stderr_log_path = Some(stderr_log_path.to_str().unwrap().to_owned());
             })?;
         }

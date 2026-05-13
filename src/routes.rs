@@ -121,10 +121,10 @@ pub async fn delete_download(req: HttpRequest, path: web::Path<String>) -> actix
     if state.worker_status.is_busy() {
         return Ok(HttpResponse::Ok().json(DeleteResponse::Busy));
     }
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ytdlp_entry(&db_conn, &video_id).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ytdlp_entry(&mut db_conn, &video_id).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else { return Ok(HttpResponse::NotFound().finish()); };
-    let total_deleted = delete_ytdlp_entry(&db_conn, &video_id).map_err(ApiError::internal_server)?;
+    let total_deleted = delete_ytdlp_entry(&mut db_conn, &video_id).map_err(ApiError::internal_server)?;
     *state = DownloadState::default();
     download_state.1.notify_all();
     drop(state);
@@ -154,10 +154,10 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
     if state.worker_status.is_busy() {
         return Ok(HttpResponse::Ok().json(DeleteResponse::Busy));
     }
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ffmpeg_entry(&mut db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else { return Ok(HttpResponse::NotFound().finish()); };
-    let total_deleted = delete_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let total_deleted = delete_ffmpeg_entry(&mut db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
     *state = TranscodeState::default();
     transcode_state.1.notify_all();
     drop(state);
@@ -178,16 +178,16 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
 #[actix_web::get("/get_downloads")]
 pub async fn get_downloads(req: HttpRequest) -> actix_web::Result<HttpResponse> {
     let app = req.app_data::<AppState>().unwrap().clone();
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entries = select_ytdlp_entries(&db_conn).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entries = select_ytdlp_entries(&mut db_conn).map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(entries))
 }
 
 #[actix_web::get("/get_transcodes")]
 pub async fn get_transcodes(req: HttpRequest) -> actix_web::Result<HttpResponse> {
     let app = req.app_data::<AppState>().unwrap().clone();
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entries = select_ffmpeg_entries(&db_conn).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entries = select_ffmpeg_entries(&mut db_conn).map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(entries))
 }
 
@@ -196,8 +196,8 @@ pub async fn get_download(req: HttpRequest, path: web::Path<String>) -> actix_we
     let video_id = path.into_inner();
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let app = req.app_data::<AppState>().unwrap().clone();
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ytdlp_entry(&db_conn, &video_id).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ytdlp_entry(&mut db_conn, &video_id).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else {
         return Ok(HttpResponse::NotFound().finish());
     };
@@ -210,8 +210,8 @@ pub async fn get_transcode(req: HttpRequest, path: web::Path<(String, String)>) 
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let app = req.app_data::<AppState>().unwrap().clone();
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ffmpeg_entry(&mut db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else {
         return Ok(HttpResponse::NotFound().finish());
     };
@@ -261,8 +261,8 @@ pub async fn get_download_link(
     let video_id = VideoId::try_new(video_id.as_str()).map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let app = req.app_data::<AppState>().unwrap().clone();
-    let db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
-    let entry = select_ffmpeg_entry(&db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
+    let mut db_conn = app.db_pool.get().map_err(ApiError::internal_server)?;
+    let entry = select_ffmpeg_entry(&mut db_conn, &video_id, audio_ext).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else {
         return Err(error::ErrorNotFound(format!("{0}/{1}", video_id.as_str(), audio_ext.as_str())));
     };

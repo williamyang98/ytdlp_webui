@@ -10,7 +10,8 @@ use serde::Serialize;
 use thiserror::Error;
 use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
 use crate::database::{
-    DatabasePool, VideoId, AudioExtension, WorkerStatus,
+    DatabasePool, DatabasePoolError, DatabaseError,
+    VideoId, AudioExtension, WorkerStatus,
     select_and_update_ffmpeg_entry, select_ffmpeg_entry, insert_ffmpeg_entry,
     select_ytdlp_entry,
 };
@@ -117,9 +118,9 @@ pub type TranscodeCache = Arc<DashMap<TranscodeKey, WorkerCacheEntry<TranscodeSt
 #[derive(Debug,Error)]
 pub enum TranscodeStartError {
     #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] r2d2::Error),
+    DatabaseConnection(#[from] DatabasePoolError),
     #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] rusqlite::Error),
+    DatabaseExecute(#[from] DatabaseError),
 }
 
 #[derive(Debug,Error)]
@@ -141,9 +142,9 @@ pub enum TranscodeError {
     #[error("Error stored in system log")]
     LoggedFail,
     #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] r2d2::Error),
+    DatabaseConnection(#[from] DatabasePoolError),
     #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] rusqlite::Error),
+    DatabaseExecute(#[from] DatabaseError),
 }
 
 pub fn try_start_transcode_worker(
@@ -182,9 +183,9 @@ pub fn try_start_transcode_worker(
         }
     });
     {
-        let db_conn = db_pool.get()?;
+        let mut db_conn = db_pool.get()?;
         // check if transcode finished on disk (cache miss due to reset)
-        if let Some(entry) = select_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext)? {
+        if let Some(entry) = select_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext)? {
             if let Some(_audio_path) = entry.audio_path {
                 let status = entry.status;
                 // TODO: Check if deleted
@@ -199,7 +200,7 @@ pub fn try_start_transcode_worker(
             }
         }
         // start transcode worker
-        let _ = insert_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext)?;
+        let _ = insert_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext)?;
     }
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching transcode process: {0}", key.as_str());
@@ -212,8 +213,8 @@ pub fn try_start_transcode_worker(
                 return;
             },
         };
-        if let Ok(db_conn) = db_pool.get() {
-            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+        if let Ok(mut db_conn) = db_pool.get() {
+            let _ = select_and_update_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext, |entry| {
                 entry.system_log_path = Some(system_log_path.to_str().unwrap().to_owned());
             }).unwrap();
         }
@@ -233,8 +234,8 @@ pub fn try_start_transcode_worker(
             Err(err) => (None, WorkerStatus::Failed, Some(err)),
         };
         {
-            let db_conn = db_pool.get().unwrap();
-            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+            let mut db_conn = db_pool.get().unwrap();
+            let _ = select_and_update_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext, |entry| {
                 entry.audio_path = audio_path.map(|p| p.to_str().unwrap().to_string());
                 entry.status = worker_status;
             }).unwrap();
@@ -272,8 +273,8 @@ fn enqueue_transcode_worker(
     }
     // get source file to transcode
     let source_path: Option<String> = {
-        let db_conn = db_pool.get()?;
-        let entry = select_ytdlp_entry(&db_conn, &key.video_id)?.expect("Entry should exist");
+        let mut db_conn = db_pool.get()?;
+        let entry = select_ytdlp_entry(&mut db_conn, &key.video_id)?.expect("Entry should exist");
         entry.audio_path
     };
     let Some(source_path) = source_path else {
@@ -373,8 +374,8 @@ fn enqueue_transcode_worker(
         transcode_state.1.notify_all();
     }
     {
-        let db_conn = db_pool.get()?;
-        let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+        let mut db_conn = db_pool.get()?;
+        let _ = select_and_update_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext, |entry| {
             entry.status = WorkerStatus::Running;
         })?;
     }
@@ -387,8 +388,8 @@ fn enqueue_transcode_worker(
         let stdout_log_file = std::fs::File::create(stdout_log_path.clone()).map_err(WorkerError::StdoutLogCreate)?;
         let mut stdout_log_writer = BufWriter::new(stdout_log_file);
         {
-            let db_conn = db_pool.get()?;
-            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+            let mut db_conn = db_pool.get()?;
+            let _ = select_and_update_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext, |entry| {
                 entry.stdout_log_path = Some(stdout_log_path.to_str().unwrap().to_owned());
             })?;
         }
@@ -414,8 +415,8 @@ fn enqueue_transcode_worker(
         let stderr_log_file = std::fs::File::create(stderr_log_path.clone()).map_err(WorkerError::StderrLogCreate)?;
         let mut stderr_log_writer = BufWriter::new(stderr_log_file);
         {
-            let db_conn = db_pool.get()?;
-            let _ = select_and_update_ffmpeg_entry(&db_conn, &key.video_id, key.audio_ext, |entry| {
+            let mut db_conn = db_pool.get()?;
+            let _ = select_and_update_ffmpeg_entry(&mut db_conn, &key.video_id, key.audio_ext, |entry| {
                 entry.stderr_log_path = Some(stderr_log_path.to_str().unwrap().to_owned());
             })?;
         }

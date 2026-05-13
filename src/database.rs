@@ -1,13 +1,52 @@
-use rusqlite::{params, OptionalExtension};
-use serde::Serialize;
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::cast::{FromPrimitive, ToPrimitive};
-use thiserror::Error;
 use crate::generate_bidirectional_binding;
 use crate::util::get_unix_time;
+use crate::schema::{ytdlp, ffmpeg};
+use diesel::backend::Backend;
+use diesel::deserialize::{FromSql, FromSqlRow};
+use diesel::expression::AsExpression;
+use diesel::expression_methods::ExpressionMethods;
+use diesel::prelude::{AsChangeset, SqliteConnection};
+use diesel::query_dsl::RunQueryDsl;
+use diesel::query_dsl::methods::{SelectDsl, FilterDsl};
+use diesel::r2d2;
+use diesel::result::OptionalExtension;
+use diesel::serialize::{Output, ToSql};
+use diesel::sql_types::{Text, Integer, BigInt};
+use diesel::{Queryable, Selectable, SelectableHelper, QueryableByName};
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::cast::FromPrimitive;
+use serde::Serialize;
+use thiserror::Error;
 
-#[derive(Clone,Debug,PartialEq,Eq,Hash,Serialize)]
+pub type DatabasePool = r2d2::Pool<r2d2::ConnectionManager<SqliteConnection>>;
+pub type DatabaseConnection = SqliteConnection;
+pub type DatabasePoolError = r2d2::PoolError;
+pub type DatabaseError = diesel::result::Error;
+pub type DatabaseResult<T> = Result<T, DatabaseError>;
+
+#[derive(Clone,Debug,PartialEq,Eq,Serialize,AsExpression,FromSqlRow)]
 #[serde(transparent)]
+#[diesel(sql_type = BigInt)]
+pub struct UnixTimestamp(u64);
+
+impl<DB> ToSql<BigInt, DB> for UnixTimestamp where DB: Backend, i64: ToSql<BigInt, DB> {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, DB>) -> diesel::serialize::Result {
+        let v: &i64 = bytemuck::cast_ref(&self.0);
+        v.to_sql(out)
+    }
+}
+
+impl<DB> FromSql<BigInt, DB> for UnixTimestamp where DB: Backend, i64: FromSql<BigInt, DB> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let v = i64::from_sql(bytes)?;
+        Ok(UnixTimestamp(v as u64))
+    }
+}
+
+#[derive(Clone,Debug,PartialEq,Eq,Hash,Serialize,AsExpression,FromSqlRow)]
+#[serde(transparent)]
+#[diesel(sql_type = Text)]
 pub struct VideoId {
     id: String,
 }
@@ -38,8 +77,24 @@ impl VideoId {
     }
 }
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq,Hash,Serialize)]
+impl<DB> ToSql<Text, DB> for VideoId where DB: Backend, str: ToSql<Text, DB> {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, DB>) -> diesel::serialize::Result {
+        self.as_str().to_sql(out)
+    }
+}
+impl<DB> FromSql<Text, DB> for VideoId where DB: Backend, *const str: FromSql<Text, DB> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        type A = *const str;
+        let text = A::from_sql(bytes)?;
+        let text = unsafe { &*text };
+        let id = VideoId::try_new(text)?;
+        Ok(id)
+    }
+}
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Hash,Serialize,AsExpression,FromSqlRow)]
 #[serde(rename_all = "lowercase")]
+#[diesel(sql_type = Text)]
 pub enum AudioExtension {
     M4A,
     AAC,
@@ -61,8 +116,25 @@ impl AudioExtension {
     }
 }
 
-#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive)]
+impl<DB> ToSql<Text, DB> for AudioExtension where DB: Backend, str: ToSql<Text, DB> {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, DB>) -> diesel::serialize::Result {
+        self.as_str().to_sql(out)
+    }
+}
+impl<DB> FromSql<Text, DB> for AudioExtension where DB: Backend, *const str: FromSql<Text, DB> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        type A = *const str;
+        let text = A::from_sql(bytes)?;
+        let text = unsafe { &*text };
+        let id = AudioExtension::try_from(text)?;
+        Ok(id)
+    }
+}
+
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive,AsExpression,FromSqlRow,bytemuck::NoUninit)]
+#[repr(i32)]
 #[serde(rename_all = "lowercase")]
+#[diesel(sql_type = Integer)]
 pub enum WorkerStatus {
     #[default]
     None = 0,
@@ -81,253 +153,157 @@ impl WorkerStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone,Copy,Debug,Error,Serialize)]
+pub enum WorkerStatusError {
+    #[error("Invalid worker status value: {0}")]
+    InvalidValue(i32),
+}
+
+impl<DB> ToSql<Integer, DB> for WorkerStatus where DB: Backend, i32: ToSql<Integer, DB> {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, DB>) -> diesel::serialize::Result {
+        let v: &i32 = bytemuck::cast_ref(self);
+        v.to_sql(out)
+    }
+}
+impl<DB> FromSql<Integer, DB> for WorkerStatus where DB: Backend, i32: FromSql<Integer, DB> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let v = i32::from_sql(bytes)?;
+        let status = WorkerStatus::from_i32(v);
+        let status = status.ok_or(WorkerStatusError::InvalidValue(v))?;
+        Ok(status)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Queryable, QueryableByName, Selectable, AsChangeset)]
+#[diesel(table_name = ytdlp)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct YtdlpRow {
     pub video_id: VideoId,
     pub status: WorkerStatus,
-    pub unix_time: u64,
+    pub unix_time: UnixTimestamp,
     pub stdout_log_path: Option<String>,
     pub stderr_log_path: Option<String>,
     pub system_log_path: Option<String>,
     pub audio_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Queryable, QueryableByName, Selectable, AsChangeset)]
+#[diesel(table_name = ffmpeg)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct FfmpegRow {
     pub video_id: VideoId,
     pub audio_ext: AudioExtension,
     pub status: WorkerStatus,
-    pub unix_time: u64,
+    pub unix_time: UnixTimestamp,
     pub stdout_log_path: Option<String>,
     pub stderr_log_path: Option<String>,
     pub system_log_path: Option<String>,
     pub audio_path: Option<String>,
 }
 
-pub type DatabasePool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
-pub type DatabaseConnection = r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>;
 
-pub fn setup_database(conn: DatabaseConnection) -> Result<(), Box<dyn std::error::Error>> {
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ytdlp (
-            video_id TEXT,
-            status INTEGER DEFAULT 0,
-            unix_time INTEGER,
-            stdout_log_path TEXT,
-            stderr_log_path TEXT,
-            system_log_path TEXT,
-            audio_path TEXT,
-            PRIMARY KEY (video_id)
-        )",
-        (),
-    )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ffmpeg (
-            video_id TEXT,
-            audio_ext TEXT,
-            status INTEGER DEFAULT 0,
-            unix_time INTEGER,
-            stdout_log_path TEXT,
-            stderr_log_path TEXT,
-            system_log_path TEXT,
-            audio_path TEXT,
-            PRIMARY KEY (video_id, audio_ext)
-        )",
-        (),
-    )?;
-    Ok(())
+pub fn open_database(url: &str) -> DatabasePool {
+    let manager = r2d2::ConnectionManager::<SqliteConnection>::new(url);
+    r2d2::Pool::builder()
+        .build(manager)
+        .expect("Could not build connection pool")
 }
 
-#[derive(Debug,Clone,Copy)]
-enum WorkerTable {
-    Ytdlp,
-    Ffmpeg,
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
+pub fn create_database(db_conn: &mut DatabaseConnection) {
+    db_conn.run_pending_migrations(MIGRATIONS).expect("Migration failed");
 }
-
-generate_bidirectional_binding!(
-    WorkerTable, &'static str, &str,
-    (Ytdlp, "ytdlp"),
-    (Ffmpeg, "ffmpeg"),
-);
 
 // insert
-pub fn insert_ytdlp_entry(
-    db_conn: &DatabaseConnection, video_id: &VideoId,
-) -> Result<usize, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ytdlp.into();
-    db_conn.execute(
-        format!("INSERT OR REPLACE INTO {table} (video_id, status, unix_time) VALUES (?1,?2,?3)").as_str(),
-        (video_id.as_str(), WorkerStatus::Queued as u8, get_unix_time()),
-    )
+pub fn insert_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<usize> {
+    use ytdlp::dsl as e;
+    diesel::insert_into(e::ytdlp)
+        .values((
+            e::video_id.eq(video_id),
+            e::status.eq(WorkerStatus::Queued),
+            e::unix_time.eq(UnixTimestamp(get_unix_time())),
+        ))
+        .execute(db_conn)
 }
 
-pub fn insert_ffmpeg_entry(
-    db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension,
-) -> Result<usize, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ffmpeg.into();
-    db_conn.execute(
-        format!("INSERT OR REPLACE INTO {table} (video_id, audio_ext, status, unix_time) VALUES (?1,?2,?3,?4)").as_str(),
-        (video_id.as_str(), audio_ext.as_str(), WorkerStatus::Queued as u8, get_unix_time()),
-    )
+pub fn insert_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
+    use ffmpeg::dsl as e;
+    diesel::insert_into(e::ffmpeg)
+        .values((
+            e::video_id.eq(video_id),
+            e::audio_ext.eq(audio_ext),
+            e::status.eq(WorkerStatus::Queued),
+            e::unix_time.eq(UnixTimestamp(get_unix_time())),
+        ))
+        .execute(db_conn)
 }
 
 // update
-pub fn update_ytdlp_entry(
-    db_conn: &DatabaseConnection, entry: &YtdlpRow,
-) -> Result<usize, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ytdlp.into();
-    db_conn.execute(
-        format!(
-            "UPDATE {table} SET \
-            unix_time=?2, status=?3, \
-            stdout_log_path=?4, stderr_log_path=?5, system_log_path=?6, audio_path=?7 \
-            WHERE video_id=?1"
-        ).as_str(),
-        params![
-            entry.video_id.as_str(),
-            entry.unix_time, entry.status.to_u8(), 
-            entry.stdout_log_path, entry.stderr_log_path, entry.system_log_path, entry.audio_path,
-        ],
-    )
+pub fn update_ytdlp_entry(db_conn: &mut DatabaseConnection, entry: &YtdlpRow) -> DatabaseResult<usize> {
+    use ytdlp::dsl as e;
+    diesel::update(e::ytdlp)
+        .filter(e::video_id.eq(&entry.video_id))
+        .set(entry)
+        .execute(db_conn)
 }
 
-pub fn update_ffmpeg_entry(
-    db_conn: &DatabaseConnection, entry: &FfmpegRow,
-) -> Result<usize, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ffmpeg.into();
-    db_conn.execute(
-        format!(
-            "UPDATE {table} SET \
-            unix_time=?3, status=?4, stdout_log_path=?5, stderr_log_path=?6, system_log_path=?7, audio_path=?8 \
-            WHERE video_id=?1 AND audio_ext=?2"
-        ).as_str(),
-        params![
-            entry.video_id.as_str(), entry.audio_ext.as_str(),
-            entry.unix_time, entry.status.to_u8(),
-            entry.stdout_log_path, entry.stderr_log_path, entry.system_log_path, entry.audio_path,
-        ],
-    )
+pub fn update_ffmpeg_entry(db_conn: &mut DatabaseConnection, entry: &FfmpegRow) -> DatabaseResult<usize> {
+    use ffmpeg::dsl as e;
+    diesel::update(e::ffmpeg)
+        .filter(e::video_id.eq(&entry.video_id))
+        .filter(e::audio_ext.eq(entry.audio_ext))
+        .set(entry)
+        .execute(db_conn)
 }
 
 // delete
-pub fn delete_ytdlp_entry(db_conn: &DatabaseConnection, video_id: &VideoId) -> Result<usize, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ytdlp.into();
-    db_conn.execute(format!("DELETE FROM {table} WHERE video_id=?1").as_str(), (video_id.as_str(),))
+pub fn delete_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<usize> {
+    use ytdlp::dsl as e;
+    diesel::delete(e::ytdlp)
+        .filter(e::video_id.eq(video_id))
+        .execute(db_conn)
 }
 
-pub fn delete_ffmpeg_entry(
-    db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension,
-) -> Result<usize, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ffmpeg.into();
-    db_conn.execute(
-        format!("DELETE FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str(),
-        (video_id.as_str(), audio_ext.as_str()),
-    )
+pub fn delete_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
+    use ffmpeg::dsl as e;
+    diesel::delete(e::ffmpeg)
+        .filter(e::video_id.eq(video_id))
+        .filter(e::audio_ext.eq(audio_ext))
+        .execute(db_conn)
 }
 
-// select
-fn map_ytdlp_row_to_entry(row: &rusqlite::Row) -> Result<YtdlpRow, rusqlite::Error> {
-    let video_id: Option<String> = row.get(0)?;
-    let video_id = video_id.expect("video_id is a primary key");
-    let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
-
-    let status: Option<u8> = row.get(1)?;
-    let status = status.expect("status should be present");
-    let status = WorkerStatus::from_u8(status).expect("status should be valid");
-
-    let unix_time: Option<u64> = row.get(2)?;
-    let unix_time = unix_time.unwrap_or(0);
-
-    Ok(YtdlpRow {
-        video_id,
-        status,
-        unix_time,
-        stdout_log_path: row.get(3)?,
-        stderr_log_path: row.get(4)?,
-        system_log_path: row.get(5)?,
-        audio_path: row.get(6)?,
-    })
+pub fn select_ytdlp_entries(db_conn: &mut DatabaseConnection) -> DatabaseResult<Vec<YtdlpRow>> {
+    use ytdlp::dsl as e;
+    e::ytdlp.load::<YtdlpRow>(db_conn)
 }
 
-pub fn select_ytdlp_entries(db_conn: &DatabaseConnection) -> Result<Vec<YtdlpRow>, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ytdlp.into();
-    let mut stmt = db_conn.prepare(format!(
-        "SELECT video_id, status, unix_time,\
-         stdout_log_path, stderr_log_path, system_log_path, audio_path FROM {table}").as_str())?;
-    let row_iter = stmt.query_map([], map_ytdlp_row_to_entry)?;
-    let mut entries = Vec::<YtdlpRow>::new();
-    for row in row_iter {
-        entries.push(row?);
-    }
-    Ok(entries)
+pub fn select_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<Option<YtdlpRow>> {
+    use ytdlp::dsl as e;
+    e::ytdlp
+        .filter(e::video_id.eq(video_id))
+        .first::<YtdlpRow>(db_conn)
+        .optional()
 }
 
-pub fn select_ytdlp_entry(db_conn: &DatabaseConnection, video_id: &VideoId) -> Result<Option<YtdlpRow>, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ytdlp.into();
-    let mut stmt = db_conn.prepare(format!(
-        "SELECT video_id, status, unix_time, \
-         stdout_log_path, stderr_log_path, system_log_path, audio_path \
-         FROM {table} WHERE video_id=?1").as_str())?;
-    stmt.query_row([video_id.as_str()], map_ytdlp_row_to_entry).optional()
+pub fn select_ffmpeg_entries(db_conn: &mut DatabaseConnection) -> DatabaseResult<Vec<FfmpegRow>> {
+    use ffmpeg::dsl as e;
+    e::ffmpeg.select(FfmpegRow::as_select())
+        .load(db_conn)
 }
 
-fn map_ffmpeg_row_to_entry(row: &rusqlite::Row) -> Result<FfmpegRow, rusqlite::Error> {
-    let video_id: Option<String> = row.get(0)?;
-    let video_id = video_id.expect("video_id is a primary key");
-    let video_id = VideoId::try_new(video_id.as_str()).expect("video_id should be valid");
-
-    let audio_ext: Option<String> = row.get(1)?;
-    let audio_ext = audio_ext.expect("audio_ext is a primary key");
-    let audio_ext = AudioExtension::try_from(audio_ext.as_str()).expect("audio_ext should be valid");
-
-    let status: Option<u8> = row.get(2)?;
-    let status = status.expect("status should be present");
-    let status = WorkerStatus::from_u8(status).expect("status should be valid");
-
-    let unix_time: Option<u64> = row.get(3)?;
-    let unix_time = unix_time.unwrap_or(0);
-
-    Ok(FfmpegRow {
-        video_id,
-        audio_ext,
-        status,
-        unix_time,
-        stdout_log_path: row.get(4)?,
-        stderr_log_path: row.get(5)?,
-        system_log_path: row.get(6)?,
-        audio_path: row.get(7)?,
-    })
-}
-
-pub fn select_ffmpeg_entries(db_conn: &DatabaseConnection) -> Result<Vec<FfmpegRow>, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ffmpeg.into();
-    let mut stmt = db_conn.prepare(format!(
-        "SELECT video_id, audio_ext, status, unix_time,\
-         stdout_log_path, stderr_log_path, system_log_path, audio_path FROM {table}").as_str())?;
-
-    let row_iter = stmt.query_map([], map_ffmpeg_row_to_entry)?;
-    let mut entries = Vec::<FfmpegRow>::new();
-    for row in row_iter {
-        entries.push(row?);
-    }
-    Ok(entries)
-}
-
-pub fn select_ffmpeg_entry(
-    db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension,
-) -> Result<Option<FfmpegRow>, rusqlite::Error> {
-    let table: &'static str = WorkerTable::Ffmpeg.into();
-    let mut stmt = db_conn.prepare(format!(
-        "SELECT video_id, audio_ext, status, unix_time,\
-         stdout_log_path, stderr_log_path, system_log_path, audio_path \
-         FROM {table} WHERE video_id=?1 AND audio_ext=?2").as_str())?;
-    stmt.query_row([video_id.as_str(), audio_ext.as_str()], map_ffmpeg_row_to_entry).optional()
+pub fn select_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<Option<FfmpegRow>> {
+    use ffmpeg::dsl as e;
+    e::ffmpeg
+        .filter(e::video_id.eq(video_id))
+        .filter(e::audio_ext.eq(audio_ext))
+        .first::<FfmpegRow>(db_conn)
+        .optional()
 }
 
 // select and update
 pub fn select_and_update_ytdlp_entry<F>(
-    db_conn: &DatabaseConnection, video_id: &VideoId, callback: F,
-) -> Result<usize, rusqlite::Error> 
+    db_conn: &mut DatabaseConnection, video_id: &VideoId, callback: F,
+) -> DatabaseResult<usize>
 where F: FnOnce(&mut YtdlpRow)
 {
     let entry = select_ytdlp_entry(db_conn, video_id)?;
@@ -339,13 +315,13 @@ where F: FnOnce(&mut YtdlpRow)
 }
 
 pub fn select_and_update_ffmpeg_entry<F>(
-    db_conn: &DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension, callback: F,
-) -> Result<usize, rusqlite::Error> 
+    db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension, callback: F,
+) -> DatabaseResult<usize> 
 where F: FnOnce(&mut FfmpegRow)
 {
     let entry = select_ffmpeg_entry(db_conn, video_id, audio_ext)?;
     let Some(mut entry) = entry else {
-        return Err(rusqlite::Error::QueryReturnedNoRows);
+        return Ok(0);
     };
     callback(&mut entry);
     update_ffmpeg_entry(db_conn, &entry)

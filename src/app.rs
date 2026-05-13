@@ -4,7 +4,7 @@ use thiserror::Error;
 use threadpool::ThreadPool;
 use dashmap::DashMap;
 use crate::{
-    database::{DatabasePool, VideoId, setup_database},
+    database::{DatabasePool, VideoId, open_database, create_database},
     metadata::{MetadataCache, Metadata},
     worker_download::{DownloadCache, DownloadState},
     worker_transcode::{TranscodeCache, TranscodeKey, TranscodeState},
@@ -81,16 +81,19 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(app_config: AppConfig, total_transcode_threads: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let db_manager = r2d2_sqlite::SqliteConnectionManager::file(app_config.data.join("index.db"));
-        let db_pool = DatabasePool::new(db_manager)?;
-        setup_database(db_pool.get()?)?;
+        let db_path = app_config.data.join("index.db");
+        let db_pool = open_database(db_path.to_string_lossy().as_ref());
+        {
+            let mut db_conn = db_pool.get()?;
+            create_database(&mut db_conn);
+        }
         let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_transcode_threads)));
         let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, WorkerCacheEntry<DownloadState>>::new());
         let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, WorkerCacheEntry<TranscodeState>>::new());
         let metadata_cache: MetadataCache = Arc::new(DashMap::<VideoId, Arc<Metadata>>::new());
         Ok(Self {
             app_config: Arc::new(app_config),
-            db_pool, 
+            db_pool,
             worker_thread_pool,
             download_cache,
             transcode_cache,
