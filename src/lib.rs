@@ -1,6 +1,7 @@
 pub mod app;
 pub mod database;
 pub mod ffmpeg;
+pub mod github_api;
 pub mod metadata;
 pub mod routes;
 pub mod schema;
