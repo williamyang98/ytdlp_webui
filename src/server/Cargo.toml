@@ -1,0 +1,15 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-files = { version = "0.6.6" }
+actix-web = { version = "4.8.0" }
+anyhow = { workspace = true }
+app = { path = "../app" }
+clap = { workspace = true }
+derive_more = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }

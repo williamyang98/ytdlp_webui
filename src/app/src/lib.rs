@@ -3,7 +3,6 @@ pub mod database;
 pub mod ffmpeg;
 pub mod github_api;
 pub mod metadata;
-pub mod routes;
 pub mod schema;
 pub mod util;
 pub mod worker_download;

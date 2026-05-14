@@ -259,7 +259,7 @@ pub fn open_database(url: &str) -> anyhow::Result<DatabasePool> {
         .context("Could not build connection pool")
 }
 
-const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 pub fn create_database(db_conn: &mut DatabaseConnection) {
     db_conn.run_pending_migrations(MIGRATIONS).expect("Migration failed");
 }

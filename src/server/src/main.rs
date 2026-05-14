@@ -1,10 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 use actix_web::{middleware, web, App, HttpServer};
 use clap::Parser;
-use ytdlp_server::{
-    app::{AppConfig, AppState},
-    routes,
-};
+use app::app::{AppConfig, AppState};
+use server::routes;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
