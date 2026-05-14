@@ -267,7 +267,7 @@ pub fn create_database(db_conn: &mut DatabaseConnection) {
 // insert
 pub fn insert_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<usize> {
     use ytdlp::dsl as e;
-    diesel::insert_into(e::ytdlp)
+    diesel::replace_into(e::ytdlp)
         .values((
             e::video_id.eq(video_id),
             e::status.eq(WorkerStatus::Queued),
@@ -278,7 +278,7 @@ pub fn insert_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) 
 
 pub fn insert_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
     use ffmpeg::dsl as e;
-    diesel::insert_into(e::ffmpeg)
+    diesel::replace_into(e::ffmpeg)
         .values((
             e::video_id.eq(video_id),
             e::audio_ext.eq(audio_ext),
