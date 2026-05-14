@@ -1,5 +1,8 @@
+use anyhow::Context;
 use serde::{Serialize,Deserialize};
 
+// API schema for github api
+// https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10
 #[derive(Debug,Clone,Serialize,Deserialize)]
 #[serde(transparent)]
 pub struct DateTimeRfc3339(#[serde(with = "time::serde::rfc3339")] pub time::OffsetDateTime);
@@ -22,6 +25,8 @@ pub struct Release {
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
 pub struct Author {
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub login: String,
     pub id: u64,
     pub avatar_url: String,
@@ -33,10 +38,10 @@ pub struct Asset {
     pub name: String,
     pub url: String,
     pub id: u64,
-    pub label: String,
+    pub label: Option<String>,
     pub browser_download_url: String,
-    pub digest: String,
-    pub uploader: Author,
+    pub digest: Option<String>,
+    pub uploader: Option<Author>,
     pub content_type: String,
     pub size: u64,
     pub created_at: DateTimeRfc3339,
@@ -60,7 +65,7 @@ pub async fn get_github_releases(owner: &str, repo: &str, per_page: u32, page: u
         .get(url)
         .headers(headers)
         .send().await?;
-    let data = response.text().await?;
-    let releases: Vec<Release> = serde_json::from_str(data.as_str())?;
+    let data = response.text().await.context("Getting body from response")?;
+    let releases: Vec<Release> = serde_json::from_str(data.as_str()).context("Parsing body into json")?;
     Ok(releases)
 }
