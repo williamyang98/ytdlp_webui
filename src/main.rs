@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use actix_web::{middleware, web, App, HttpServer};
 use clap::Parser;
 use ytdlp_server::{
@@ -53,7 +53,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(path) = args.ytdlp_binary_path { app_config.ytdlp_binary = PathBuf::from(path); }
     if let Some(path) = args.ffmpeg_binary_path { app_config.ffmpeg_binary = PathBuf::from(path); }
     app_config.seed_directories()?;
-    let app_state = AppState::new(app_config, total_transcode_threads)?;
+    app_config.total_transcode_threads = total_transcode_threads;
+    let app_state = AppState::new(app_config)?;
+    let app_state = Arc::new(app_state);
     // start server
     const API_PREFIX: &str = "/api/v1";
     HttpServer::new(move || {

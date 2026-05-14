@@ -43,6 +43,7 @@ pub struct AppConfig {
     pub transcode: PathBuf,
     pub ffmpeg_binary: PathBuf,
     pub ytdlp_binary: PathBuf,
+    pub total_transcode_threads: usize,
 }
 
 impl Default for AppConfig {
@@ -56,6 +57,7 @@ impl Default for AppConfig {
             transcode: data.join("transcode"),
             ffmpeg_binary: root.join("bin").join("ffmpeg.exe"),
             ytdlp_binary: root.join("bin").join("yt-dlp.exe"),
+            total_transcode_threads: 8,
         }
     }
 }
@@ -80,14 +82,14 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(app_config: AppConfig, total_transcode_threads: usize) -> anyhow::Result<Self> {
+    pub fn new(app_config: AppConfig) -> anyhow::Result<Self> {
         let db_path = app_config.data.join("index.db");
         let db_pool = open_database(db_path.to_string_lossy().as_ref())?;
         {
             let mut db_conn = db_pool.get()?;
             create_database(&mut db_conn);
         }
-        let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(total_transcode_threads)));
+        let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(app_config.total_transcode_threads)));
         let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, WorkerCacheEntry<DownloadState>>::new());
         let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, WorkerCacheEntry<TranscodeState>>::new());
         let metadata_cache: MetadataCache = Arc::new(DashMap::<VideoId, Arc<Metadata>>::new());

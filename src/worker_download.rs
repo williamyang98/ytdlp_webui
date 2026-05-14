@@ -8,9 +8,9 @@ use std::thread;
 use dashmap::DashMap;
 use serde::Serialize;
 use thiserror::Error;
-use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
+use crate::app::{AppState, WorkerCacheEntry, WorkerError};
 use crate::database::{
-    DatabasePool, DatabaseError, DatabasePoolError,
+    DatabaseError, DatabasePoolError,
     VideoId, WorkerStatus,
     insert_ytdlp_entry, select_ytdlp_entry, select_and_update_ytdlp_entry,
 };
@@ -96,10 +96,11 @@ pub enum DownloadError {
     DatabaseExecute(#[from] DatabaseError),
 }
 
-pub fn try_start_download_worker(
-    video_id: VideoId, download_cache: DownloadCache, app_config: Arc<AppConfig>,
-    db_pool: DatabasePool, worker_thread_pool: WorkerThreadPool,
-) -> Result<WorkerStatus, DownloadStartError> {
+pub fn try_start_download_worker(video_id: VideoId, app: Arc<AppState>) -> Result<WorkerStatus, DownloadStartError> {
+    let download_cache = app.download_cache.clone();
+    let app_config = app.app_config.clone();
+    let db_pool = app.db_pool.clone();
+    let worker_thread_pool = app.worker_thread_pool.clone();
     // check if download in progress (cache hit)
     {
         let download_state = download_cache.entry(video_id.clone()).or_default();
@@ -166,9 +167,7 @@ pub fn try_start_download_worker(
         }
         let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
         // launch process
-        let res = enqueue_download_worker(
-            video_id.clone(), download_cache.clone(), app_config.clone(), db_pool.clone(), system_log_writer.clone(),
-        );
+        let res = enqueue_download_worker(video_id.clone(), app.clone(), system_log_writer.clone());
         if let Err(ref err) = res {
             let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
         }
@@ -195,10 +194,10 @@ pub fn try_start_download_worker(
     Ok(WorkerStatus::Queued)
 }
 
-fn enqueue_download_worker(
-    video_id: VideoId, download_cache: DownloadCache, app_config: Arc<AppConfig>, db_pool: DatabasePool,
-    system_log_writer: Arc<Mutex<impl Write>>,
-) -> Result<PathBuf, DownloadError> {
+fn enqueue_download_worker(video_id: VideoId, app: Arc<AppState>, system_log_writer: Arc<Mutex<impl Write>>) -> Result<PathBuf, DownloadError> {
+    let download_cache = app.download_cache.clone();
+    let app_config = app.app_config.clone();
+    let db_pool = app.db_pool.clone();
     // logging files
     let stdout_log_path = app_config.download.join(format!("{}.stdout.log", video_id.as_str()));
     let stderr_log_path = app_config.download.join(format!("{}.stderr.log", video_id.as_str()));

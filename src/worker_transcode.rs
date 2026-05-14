@@ -8,16 +8,15 @@ use std::thread;
 use dashmap::DashMap;
 use serde::Serialize;
 use thiserror::Error;
-use crate::app::{AppConfig, WorkerError, WorkerThreadPool, WorkerCacheEntry};
+use crate::app::{AppState, WorkerCacheEntry, WorkerError};
 use crate::database::{
-    DatabasePool, DatabasePoolError, DatabaseError,
+    DatabasePoolError, DatabaseError,
     VideoId, AudioExtension, WorkerStatus,
     select_and_update_ffmpeg_entry, select_ffmpeg_entry, insert_ffmpeg_entry,
     select_ytdlp_entry,
 };
 use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
 use crate::metadata::{Metadata, Thumbnail};
-use crate::worker_download::DownloadCache;
 use crate::ffmpeg;
 
 #[derive(Clone,Debug,PartialEq,Eq,Hash)]
@@ -147,12 +146,11 @@ pub enum TranscodeError {
     DatabaseExecute(#[from] DatabaseError),
 }
 
-pub fn try_start_transcode_worker(
-    key: TranscodeKey,
-    download_cache: DownloadCache, transcode_cache: TranscodeCache, app_config: Arc<AppConfig>, 
-    db_pool: DatabasePool, worker_thread_pool: WorkerThreadPool,
-    metadata: Option<Arc<Metadata>>,
-) -> Result<WorkerStatus, TranscodeStartError> {
+pub fn try_start_transcode_worker(key: TranscodeKey, app: Arc<AppState>, metadata: Option<Arc<Metadata>>) -> Result<WorkerStatus, TranscodeStartError> {
+    let transcode_cache = app.transcode_cache.clone();
+    let app_config = app.app_config.clone();
+    let db_pool = app.db_pool.clone();
+    let worker_thread_pool = app.worker_thread_pool.clone();
     // check if transcode in progress (cache hit)
     {
         let transcode_state = transcode_cache.entry(key.clone()).or_default();
@@ -220,11 +218,7 @@ pub fn try_start_transcode_worker(
         }
         let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
         // launch process
-        let res = enqueue_transcode_worker(
-            key.clone(), download_cache.clone(), transcode_cache.clone(), 
-            app_config.clone(), db_pool.clone(), system_log_writer.clone(),
-            metadata,
-        );
+        let res = enqueue_transcode_worker(key.clone(), app.clone(), metadata, system_log_writer.clone());
         if let Err(ref err) = res {
             let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
         }
@@ -252,10 +246,14 @@ pub fn try_start_transcode_worker(
 }
 
 fn enqueue_transcode_worker(
-    key: TranscodeKey, download_cache: DownloadCache, transcode_cache: TranscodeCache,
-    app_config: Arc<AppConfig>, db_pool: DatabasePool, system_log_writer: Arc<Mutex<impl Write>>,
-    metadata: Option<Arc<Metadata>>,
+    key: TranscodeKey, app: Arc<AppState>, metadata: Option<Arc<Metadata>>,
+    system_log_writer: Arc<Mutex<impl Write>>,
 ) -> Result<PathBuf, TranscodeError> {
+    let download_cache = app.download_cache.clone();
+    let transcode_cache = app.transcode_cache.clone();
+    let app_config = app.app_config.clone();
+    let db_pool = app.db_pool.clone();
+
     let filename = format!("{0}.{1}", key.video_id.as_str(), key.audio_ext.as_str());
     let audio_path = app_config.transcode.join(filename.as_str());
     // wait for download worker
