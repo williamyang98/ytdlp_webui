@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Condvar};
 use thiserror::Error;
@@ -37,37 +38,46 @@ pub enum WorkerError {
 
 #[derive(Clone,Debug)]
 pub struct AppConfig {
-    pub root: PathBuf,
-    pub data: PathBuf,
-    pub download: PathBuf,
-    pub transcode: PathBuf,
-    pub ffmpeg_binary: PathBuf,
-    pub ytdlp_binary: PathBuf,
+    pub current_working_directory: PathBuf,
+    pub data_folder: PathBuf,
+    pub static_folder: PathBuf,
+    pub downloads_folder: PathBuf,
+    pub transcodes_folder: PathBuf,
+    pub binaries_folder: PathBuf,
+    pub database_path: PathBuf,
     pub total_transcode_threads: usize,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        let root = Path::new(".");
-        let data = root.join("data");
-        Self {
-            root: root.to_owned(),
-            data: data.to_owned(), 
-            download: data.join("downloads"),
-            transcode: data.join("transcode"),
-            ffmpeg_binary: root.join("bin").join("ffmpeg.exe"),
-            ytdlp_binary: root.join("bin").join("yt-dlp.exe"),
-            total_transcode_threads: 8,
-        }
-    }
-}
-
 impl AppConfig {
-    pub fn seed_directories(&self) -> Result<(), std::io::Error> {
-        std::fs::create_dir_all(&self.data)?;
-        std::fs::create_dir_all(&self.download)?;
-        std::fs::create_dir_all(&self.transcode)?;
-        Ok(())
+    pub fn new(data_folder: &Path, static_folder: &Path) -> anyhow::Result<Self> {
+        let downloads_folder = data_folder.join("downloads");
+        let transcodes_folder = data_folder.join("transcodes");
+        let binaries_folder = data_folder.join("binaries");
+        let database_path = data_folder.join("index.db");
+        let current_working_directory = std::env::current_dir()
+            .context("Couldn't get current working directory of process")?;
+
+        std::fs::create_dir_all(data_folder).context("Couldn't create data folder")?;
+        std::fs::create_dir_all(&downloads_folder).context("Couldn't create downloads folder")?;
+        std::fs::create_dir_all(&transcodes_folder).context("Couldn't create transcodes folder")?;
+        std::fs::create_dir_all(&binaries_folder).context("Couldn't create binaries folder")?;
+        if !static_folder.exists() {
+            return Err(anyhow::anyhow!("Static folder doesn't exist"));
+        }
+        if !static_folder.is_dir() {
+            return Err(anyhow::anyhow!("Static folder isn't a directory"));
+        }
+
+        Ok(Self {
+            current_working_directory,
+            data_folder: data_folder.to_path_buf(),
+            static_folder: static_folder.to_path_buf(),
+            downloads_folder,
+            transcodes_folder,
+            binaries_folder,
+            database_path,
+            total_transcode_threads: 8,
+        })
     }
 }
 
@@ -83,8 +93,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(app_config: AppConfig) -> anyhow::Result<Self> {
-        let db_path = app_config.data.join("index.db");
-        let db_pool = open_database(db_path.to_string_lossy().as_ref())?;
+        let db_pool = open_database(app_config.database_path.to_string_lossy().as_ref())?;
         {
             let mut db_conn = db_pool.get()?;
             create_database(&mut db_conn);

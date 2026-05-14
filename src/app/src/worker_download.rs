@@ -152,7 +152,7 @@ pub fn try_start_download_worker(video_id: VideoId, app: Arc<AppState>) -> Resul
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching download process: {0}", video_id.as_str());
         // setup logging
-        let system_log_path = app_config.download.join(format!("{}.system.log", video_id.as_str()));
+        let system_log_path = app_config.downloads_folder.join(format!("{}.system.log", video_id.as_str()));
         let system_log_file = match std::fs::File::create(system_log_path.clone()) {
             Ok(system_log_file) => system_log_file,
             Err(err) => {
@@ -199,15 +199,17 @@ fn enqueue_download_worker(video_id: VideoId, app: Arc<AppState>, system_log_wri
     let app_config = app.app_config.clone();
     let db_pool = app.db_pool.clone();
     // logging files
-    let stdout_log_path = app_config.download.join(format!("{}.stdout.log", video_id.as_str()));
-    let stderr_log_path = app_config.download.join(format!("{}.stderr.log", video_id.as_str()));
+    let stdout_log_path = app_config.downloads_folder.join(format!("{}.stdout.log", video_id.as_str()));
+    let stderr_log_path = app_config.downloads_folder.join(format!("{}.stderr.log", video_id.as_str()));
     // spawn process
     let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
-    let process_res = Command::new(app_config.ytdlp_binary.clone())
+    let ytdlp_binary_path = app_config.binaries_folder.join("yt-dlp.exe");
+    let ffmpeg_binary_path = app_config.binaries_folder.join("ffmpeg.exe");
+    let process_res = Command::new(ytdlp_binary_path)
         .args(ytdlp::get_ytdlp_arguments(
             url.as_str(), 
-            app_config.ffmpeg_binary.to_str().unwrap(),
-            app_config.download.join("%(id)s.%(ext)s").to_str().unwrap(),
+            ffmpeg_binary_path.to_str().expect("Failed to turn ffmpeg binary path into UTF-8 string"),
+            app_config.downloads_folder.join("%(id)s.%(ext)s").to_str().unwrap(),
         ))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -336,7 +338,8 @@ fn enqueue_download_worker(video_id: VideoId, app: Arc<AppState>, system_log_wri
     let Some(audio_path) = audio_path else {
         return Err(DownloadError::MissingOutputPath)
     };
-    let audio_path = app_config.root.join(audio_path);
+    // download path is relative to current working directory of process
+    let audio_path = app_config.current_working_directory.join(audio_path);
     if audio_path.exists() {
         Ok(audio_path)
     } else {

@@ -203,7 +203,7 @@ pub fn try_start_transcode_worker(key: TranscodeKey, app: Arc<AppState>, metadat
     worker_thread_pool.lock().unwrap().execute(move || {
         log::info!("Launching transcode process: {0}", key.as_str());
         // setup logging
-        let system_log_path = app_config.transcode.join(format!("{}.system.log", key.as_str()));
+        let system_log_path = app_config.transcodes_folder.join(format!("{}.system.log", key.as_str()));
         let system_log_file = match std::fs::File::create(system_log_path.clone()) {
             Ok(system_log_file) => system_log_file,
             Err(err) => {
@@ -255,7 +255,7 @@ fn enqueue_transcode_worker(
     let db_pool = app.db_pool.clone();
 
     let filename = format!("{0}.{1}", key.video_id.as_str(), key.audio_ext.as_str());
-    let audio_path = app_config.transcode.join(filename.as_str());
+    let audio_path = app_config.transcodes_folder.join(filename.as_str());
     // wait for download worker
     {
         let download_state = download_cache.entry(key.video_id.clone()).or_default().clone();
@@ -299,8 +299,8 @@ fn enqueue_transcode_worker(
     //     return Ok(audio_path);
     // }
     // logging files
-    let stdout_log_path = app_config.transcode.join(format!("{}.stdout.log", key.as_str()));
-    let stderr_log_path = app_config.transcode.join(format!("{}.stderr.log", key.as_str()));
+    let stdout_log_path = app_config.transcodes_folder.join(format!("{}.stdout.log", key.as_str()));
+    let stderr_log_path = app_config.transcodes_folder.join(format!("{}.stderr.log", key.as_str()));
     // spawn process
     let process_args = {
         let mut args = Vec::<String>::new();
@@ -351,7 +351,8 @@ fn enqueue_transcode_worker(
         ]);
         args
     };
-    let process_res = Command::new(app_config.ffmpeg_binary.clone())
+    let ffmpeg_binary_path = app_config.binaries_folder.join("ffmpeg.exe");
+    let process_res = Command::new(ffmpeg_binary_path)
         .args(process_args.as_slice())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

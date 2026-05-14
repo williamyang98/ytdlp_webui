@@ -19,16 +19,21 @@ struct Args {
     /// Maximum number of worker threads
     #[arg(long, default_value_t = 0)]
     total_worker_threads: usize,
-    /// ffmpeg binary for transcoding between formats
-    #[arg(long)]
-    #[cfg_attr(windows, arg(default_value = Some("./bin/ffmpeg.exe")))]
-    #[cfg_attr(unix, arg(default_value = Some("ffmpeg")))]
-    ffmpeg_binary_path: Option<String>,
-    /// yt-dlp binary for downloading from Youtube
-    #[arg(long)]
-    #[cfg_attr(windows, arg(default_value = Some("./bin/yt-dlp.exe")))]
-    #[cfg_attr(unix, arg(default_value = Some("./bin/yt-dlp")))]
-    ytdlp_binary_path: Option<String>,
+    /// Data folder
+    #[arg(long, default_value = "./data", value_parser = validate_is_directory_empty_or_exists)]
+    data_folder: PathBuf,
+    /// Static website folder
+    #[arg(long, default_value = "./static", value_parser = validate_is_directory_empty_or_exists)]
+    static_folder: PathBuf,
+}
+
+fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(s);
+    if path.exists() && !path.is_dir() {
+        Err("Cannot write to existing path that is not a directory".into())
+    } else {
+        Ok(path)
+    }
 }
 
 #[actix_web::main]
@@ -47,10 +52,7 @@ async fn main() -> anyhow::Result<()> {
         0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
         x => x,
     };
-    let mut app_config = AppConfig::default();
-    if let Some(path) = args.ytdlp_binary_path { app_config.ytdlp_binary = PathBuf::from(path); }
-    if let Some(path) = args.ffmpeg_binary_path { app_config.ffmpeg_binary = PathBuf::from(path); }
-    app_config.seed_directories()?;
+    let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
     app_config.total_transcode_threads = total_transcode_threads;
     let app_state = AppState::new(app_config)?;
     let app_state = Arc::new(app_state);
