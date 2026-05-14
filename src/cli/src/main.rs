@@ -31,8 +31,7 @@ pub async fn get_ytdlp_releases() -> anyhow::Result<Vec<YtdlpRelease>> {
     Ok(releases)
 }
 
-#[pollster::main]
-async fn main() -> anyhow::Result<()> {
+async fn entry() -> anyhow::Result<()> {
     env_logger::init();
 
     let releases = get_ytdlp_releases().await?;
@@ -74,4 +73,11 @@ async fn main() -> anyhow::Result<()> {
     drop(file);
     progress_bar.finish();
     Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    let rt = actix_web::rt::Runtime::new()?;
+    let handle = rt.spawn(entry());
+    let res = rt.block_on(handle)?;
+    res
 }

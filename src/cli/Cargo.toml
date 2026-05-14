@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-web = { workspace = true }
 anyhow = { workspace = true }
 app = { path = "../app" }
 clap = { workspace = true }
@@ -11,6 +12,5 @@ env_logger = { workspace = true }
 futures-util = { workspace = true }
 indicatif = { workspace = true }
 log = { workspace = true }
-pollster = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
