@@ -80,7 +80,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(app_config: AppConfig, total_transcode_threads: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(app_config: AppConfig, total_transcode_threads: usize) -> anyhow::Result<Self> {
         let db_path = app_config.data.join("index.db");
         let db_pool = open_database(db_path.to_string_lossy().as_ref());
         {

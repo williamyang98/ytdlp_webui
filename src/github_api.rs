@@ -49,7 +49,7 @@ pub fn get_github_releases_url(owner: &str, repo: &str, per_page: u32, page: u32
     format!("{URL}/{owner}/{repo}/releases?per_page={per_page}&page={page}")
 }
 
-pub async fn get_github_releases(owner: &str, repo: &str, per_page: u32, page: u32) -> Result<Vec<Release>, Box<dyn std::error::Error>> {
+pub async fn get_github_releases(owner: &str, repo: &str, per_page: u32, page: u32) -> anyhow::Result<Vec<Release>> {
     let url = get_github_releases_url(owner, repo, per_page, page);
     use reqwest::header::{HeaderMap, USER_AGENT};
     let mut headers = HeaderMap::new();

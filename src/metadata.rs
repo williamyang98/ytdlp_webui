@@ -76,7 +76,7 @@ pub struct Metadata {
     pub page_info: PageInfo,
 }
 
-pub async fn get_metadata_from_cache(video_id: VideoId, cache: MetadataCache) -> Result<Arc<Metadata>, Box<dyn std::error::Error>> {
+pub async fn get_metadata_from_cache(video_id: VideoId, cache: MetadataCache) -> anyhow::Result<Arc<Metadata>> {
     if let Some(metadata) = cache.get(&video_id) {
         return Ok(metadata.clone());
     }

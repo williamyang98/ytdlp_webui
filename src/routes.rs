@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use anyhow::Context;
 use actix_web::{
     error, 
     http::{header::{ContentDisposition, ContentType, DispositionParam, DispositionType}, StatusCode}, 
@@ -83,14 +84,18 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
     response.download_status = try_start_download_worker(
         video_id.clone(),
         app.download_cache.clone(), app.app_config.clone(), app.db_pool.clone(), app.worker_thread_pool.clone(),
-    ).map_err(ApiError::internal_server)?;
+    )
+        .with_context(|| "Failed to start download worker")
+        .map_err(ApiError::internal_server)?;
     // transcode
     let metadata = get_metadata_from_cache(video_id, app.metadata_cache).await.ok();
     response.transcode_status = try_start_transcode_worker(
         transcode_key.clone(),
         app.download_cache, app.transcode_cache, app.app_config.clone(), app.db_pool.clone(), app.worker_thread_pool.clone(),
         metadata,
-    ).map_err(ApiError::internal_server)?;
+    )
+        .with_context(|| "Failed to start transcode worker")
+        .map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(response))
 }
 
