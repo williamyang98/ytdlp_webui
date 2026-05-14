@@ -6,7 +6,8 @@ on:
     branches: [ "master", "main", "dev" ]
 
 env:
-  PACKAGE_DIR: package
+  PACKAGE_DIR: ytdlp_webui_ubuntu_x86
+  BUILD_TYPE: release
 
 jobs:
   skip_check:
@@ -35,20 +36,28 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Strict Lint
+      shell: bash
+      run: cargo clippy --profile ${{env.BUILD_TYPE}} -- -D warnings
+
     - name: Build
       shell: bash
-      run: cargo build
+      run: cargo build --profile ${{env.BUILD_TYPE}}
 
     - name: Copy files
       shell: bash
-      run: ./scripts/create_package.sh ${{env.PACKAGE_DIR}} debug ytdlp_server
+      run: |
+        mkdir -p ${{env.PACKAGE_DIR}}
+        cp ./target/${{env.BUILD_TYPE}}/server ${{env.PACKAGE_DIR}}/
+        cp ./target/${{env.BUILD_TYPE}}/cli ${{env.PACKAGE_DIR}}/
+        cp ./README.md ${{env.PACKAGE_DIR}}/
+        cp ./LICENSE ${{env.PACKAGE_DIR}}/
+        cp -rf ./static/ ${{env.PACKAGE_DIR}}/
+        cp -rf ./scripts/ ${{env.PACKAGE_DIR}}/
+        cp -rf ./docs/ ${{env.PACKAGE_DIR}}/
 
-    - name: Download third party binaries
-      shell: bash
-      run: ./scripts/download_ubuntu.sh
-
-    - name: Upload files 
+    - name: Upload files
       uses: actions/upload-artifact@v4
       with:
-        name: ytdlp_webui_ubuntu_x86
+        name: ${{env.PACKAGE_DIR}}
         path: ${{github.workspace}}/${{env.PACKAGE_DIR}}

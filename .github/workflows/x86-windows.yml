@@ -6,7 +6,8 @@ on:
     branches: [ "master", "main", "dev" ]
 
 env:
-  PACKAGE_DIR: package
+  PACKAGE_DIR: ytdlp_webui_windows_x86
+  BUILD_TYPE: release
 
 jobs:
   skip_check:
@@ -35,19 +36,23 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Strict Lint
+      shell: bash
+      run: cargo clippy --profile ${{env.BUILD_TYPE}} -- -D warnings
+
     - name: Build
       shell: bash
-      run: cargo build
+      run: cargo build --profile ${{env.BUILD_TYPE}}
+
+    - name: Download binaries
+      shell: bash
+      run: cargo run --profile ${{env.BUILD_TYPE}} --bin cli
 
     - name: Copy files
       shell: bash
-      run: ./scripts/create_package.sh ${{env.PACKAGE_DIR}} debug
+      run: ./scripts/create_package_windows.sh ${{env.PACKAGE_DIR}} ${{env.BUILD_TYPE}}
 
-    - name: Download third party binaries
-      shell: bash
-      run: ./scripts/download_win32.sh
-
-    - name: Upload files 
+    - name: Upload files
       uses: actions/upload-artifact@v4
       with:
         name: ytdlp_webui_windows_x86

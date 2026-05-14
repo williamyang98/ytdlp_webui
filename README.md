@@ -5,7 +5,7 @@
 Download and convert Youtube videos into audio clips. Has a web UI client that wraps around ```yt-dlp``` and ```ffmpeg``` and caches downloaded and transcoded files locally.
 
 ## Usage
-1. Start the server: ```ytdlp_server --url 127.0.0.1 --port 8080```.
+1. Start the server: ```server --url 127.0.0.1 --port 8080```.
 2. Access the webpage with your browser: ```http://localhost:8080```.
 3. Copy and paste video link into URL bar.
 4. Press ```Request``` button.
@@ -16,7 +16,8 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 ![Screenshot](./docs/screenshot_webpage.png)
 
 ## Building
-1. Download rust.
-2. Download ffmpeg and yt-dlp using ```./scripts/download_*.sh``` for your platform.
-3. Build server: ```cargo build -r```
-4. Run server: ```cargo run -r```
+1. Download rust
+2. Download packages using ```./scripts/download_*.sh``` for your platform if required
+3. Build programs: ```cargo build -r```
+4. Download binaries: ```cargo run -r --bin cli```
+5. Run server: ```cargo run -r --bin server```
