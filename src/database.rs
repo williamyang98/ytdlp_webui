@@ -5,6 +5,7 @@ use crate::util::get_unix_time;
 use crate::schema::{ytdlp, ffmpeg};
 use anyhow::Context;
 use diesel::backend::Backend;
+use diesel::connection::SimpleConnection;
 use diesel::deserialize::{FromSql, FromSqlRow};
 use diesel::expression::AsExpression;
 use diesel::expression_methods::ExpressionMethods;
@@ -204,15 +205,56 @@ pub struct FfmpegRow {
     pub audio_path: Option<String>,
 }
 
+// https://stackoverflow.com/a/57717533
+// Custom connection manager that handles busy timeouts for SQLite to retry if it encounters SQLITE_BUSY
+// This is because SQLite only supports a single writer and multiple readers
+// Diesel by default doesn't handle this meaning it returns a "database is locked" error even with a connection pool like r2d2
+#[derive(Debug)]
+pub struct SqliteConnectionOptions {
+    pub enable_write_ahead_logging_mode: bool,
+    pub enable_foreign_keys: bool,
+    pub busy_timeout: Option<Duration>,
+}
+
+impl diesel::r2d2::CustomizeConnection<DatabaseConnection, diesel::r2d2::Error> for SqliteConnectionOptions {
+    fn on_acquire(&self, db_conn: &mut DatabaseConnection) -> Result<(), diesel::r2d2::Error> {
+        use diesel::r2d2::Error::QueryError;
+        // https://sqlite.org/wal.html
+        // WAL mode provides more concurrency as readers do not block writers and a writer does not block readers. Reading and writing can proceed concurrently
+        if self.enable_write_ahead_logging_mode {
+            db_conn
+                .batch_execute("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
+                .map_err(QueryError)?;
+        }
+        // https://www.sqlite.org/pragma.html#pragma_foreign_keys
+        // OFF by default for sqlite 3.6.19 and above
+        if self.enable_foreign_keys {
+            db_conn
+                .batch_execute("PRAGMA foreign_keys = ON;")
+                .map_err(QueryError)?;
+        }
+        // https://www.sqlite.org/pragma.html#pragma_busy_timeout
+        if let Some(duration) = self.busy_timeout {
+            let millis = duration.as_millis();
+            db_conn
+                .batch_execute(&format!("PRAGMA busy_timeout = {millis};"))
+                .map_err(QueryError)?;
+        }
+        Ok(())
+    }
+}
 
 pub fn open_database(url: &str) -> anyhow::Result<DatabasePool> {
     let manager = r2d2::ConnectionManager::<SqliteConnection>::new(url);
+    let connection_timeout = Duration::from_secs(30);
     r2d2::Pool::builder()
-        // https://stackoverflow.com/a/58299335
-        // When SQLite tries to access a file that is locked by another process, the default behavior is to return SQLITE_BUSY.
-        // SQLite only supports 1 writer at a given time and diesel throws an error about locking the database instead of waiting
-        .max_size(1)
-        .connection_timeout(Duration::from_secs(30))
+        .max_size(10)
+        .connection_timeout(connection_timeout)
+        .connection_customizer(Box::new(SqliteConnectionOptions {
+            enable_write_ahead_logging_mode: true,
+            enable_foreign_keys: false,
+            busy_timeout: Some(connection_timeout),
+        }))
         .build(manager)
         .context("Could not build connection pool")
 }
