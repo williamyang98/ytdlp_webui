@@ -1,7 +1,34 @@
 use std::cmp::Ordering;
+use std::path::PathBuf;
 use app::github_api::{DateTimeRfc3339, get_github_releases};
+use app::app::AppConfig;
+use anyhow::Context;
+use clap::Parser;
 use serde::Serialize;
 use futures_util::StreamExt;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Maximum number of transcode threads
+    #[arg(long, default_value_t = 0)]
+    total_transcode_threads: usize,
+    /// Data folder
+    #[arg(long, default_value = "./data", value_parser = validate_is_directory_empty_or_exists)]
+    data_folder: PathBuf,
+    /// Static website folder
+    #[arg(long, default_value = "./static", value_parser = validate_is_directory_empty_or_exists)]
+    static_folder: PathBuf,
+}
+
+fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(s);
+    if path.exists() && !path.is_dir() {
+        Err("Cannot write to existing path that is not a directory".into())
+    } else {
+        Ok(path)
+    }
+}
 
 #[derive(Clone,Debug,Serialize)]
 pub struct YtdlpRelease {
@@ -27,12 +54,25 @@ pub async fn get_ytdlp_releases() -> anyhow::Result<Vec<YtdlpRelease>> {
             }
         }
     }
-    releases.sort_by(|a, b| b.updated_at.0.cmp(&a.updated_at.0));
+    releases.sort_by_key(|e| std::cmp::Reverse(e.updated_at.0));
     Ok(releases)
 }
 
-async fn entry() -> anyhow::Result<()> {
+#[actix_web::main]
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let total_transcode_threads: usize = match args.total_transcode_threads {
+        0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
+        x => x,
+    };
+
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "INFO");
+    }
     env_logger::init();
+
+    let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
+    app_config.total_transcode_threads = total_transcode_threads;
 
     let releases = get_ytdlp_releases().await?;
     let release = releases.first().ok_or(anyhow::anyhow!("No releases available"))?;
@@ -59,7 +99,9 @@ async fn entry() -> anyhow::Result<()> {
 
     use std::fs::File;
     use std::io::Write;
-    let mut file = File::create("./bin/yt-dlp.exe")?;
+
+    let ytdlp_binary_path = app_config.binaries_folder.join("yt-dlp.exe");
+    let mut file = File::create(&ytdlp_binary_path).context("Failed to open ytdlp binary path")?;
 
     let mut total_downloaded_bytes: u64 = 0;
     let mut stream_bytes = response.bytes_stream();
@@ -73,11 +115,4 @@ async fn entry() -> anyhow::Result<()> {
     drop(file);
     progress_bar.finish();
     Ok(())
-}
-
-fn main() -> anyhow::Result<()> {
-    let rt = actix_web::rt::Runtime::new()?;
-    let handle = rt.spawn(entry());
-    let res = rt.block_on(handle)?;
-    res
 }
