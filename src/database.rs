@@ -1,6 +1,9 @@
+use std::time::Duration;
+
 use crate::generate_bidirectional_binding;
 use crate::util::get_unix_time;
 use crate::schema::{ytdlp, ffmpeg};
+use anyhow::Context;
 use diesel::backend::Backend;
 use diesel::deserialize::{FromSql, FromSqlRow};
 use diesel::expression::AsExpression;
@@ -202,11 +205,16 @@ pub struct FfmpegRow {
 }
 
 
-pub fn open_database(url: &str) -> DatabasePool {
+pub fn open_database(url: &str) -> anyhow::Result<DatabasePool> {
     let manager = r2d2::ConnectionManager::<SqliteConnection>::new(url);
     r2d2::Pool::builder()
+        // https://stackoverflow.com/a/58299335
+        // When SQLite tries to access a file that is locked by another process, the default behavior is to return SQLITE_BUSY.
+        // SQLite only supports 1 writer at a given time and diesel throws an error about locking the database instead of waiting
+        .max_size(1)
+        .connection_timeout(Duration::from_secs(30))
         .build(manager)
-        .expect("Could not build connection pool")
+        .context("Could not build connection pool")
 }
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");

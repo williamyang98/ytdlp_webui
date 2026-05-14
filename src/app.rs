@@ -82,7 +82,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(app_config: AppConfig, total_transcode_threads: usize) -> anyhow::Result<Self> {
         let db_path = app_config.data.join("index.db");
-        let db_pool = open_database(db_path.to_string_lossy().as_ref());
+        let db_pool = open_database(db_path.to_string_lossy().as_ref())?;
         {
             let mut db_conn = db_pool.get()?;
             create_database(&mut db_conn);
