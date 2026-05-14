@@ -1,11 +1,12 @@
-use std::cmp::Ordering;
-use std::path::PathBuf;
-use app::github_api::{DateTimeRfc3339, get_github_releases};
-use app::app::AppConfig;
 use anyhow::Context;
+use app::app::AppConfig;
+use app::github_api::{DateTimeRfc3339, get_github_releases};
 use clap::Parser;
-use serde::Serialize;
 use futures_util::StreamExt;
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::cmp::Ordering;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -30,22 +31,50 @@ fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[derive(Clone,Debug,Serialize)]
-pub struct YtdlpRelease {
+#[derive(Clone,Debug)]
+pub struct TaggedRelease {
     pub tag_name: String,
+    pub asset_name: String,
+    pub filesize_bytes: u64,
     pub browser_download_url: String,
     pub created_at: DateTimeRfc3339,
     pub updated_at: DateTimeRfc3339,
 }
 
-pub async fn get_ytdlp_releases() -> anyhow::Result<Vec<YtdlpRelease>> {
-    let github_releases = get_github_releases("yt-dlp", "yt-dlp", 10, 1).await?;
-    let mut releases: Vec<YtdlpRelease> = vec![];
+#[derive(Clone,Debug)]
+pub enum TaggedFilename {
+    String(String),
+    Regex(Regex),
+}
+
+impl TaggedFilename {
+    pub fn compare(&self, other: &str) -> bool {
+        match self {
+            Self::String(s) => s.as_str().cmp(other) == Ordering::Equal,
+            Self::Regex(r) => r.is_match_at(other, 0),
+        }
+    }
+}
+
+#[derive(Clone,Debug)]
+pub struct TaggedAsset {
+    pub owner: String,
+    pub repo: String,
+    pub filename: TaggedFilename,
+}
+
+async fn get_tagged_release(file: &TaggedAsset) -> anyhow::Result<Vec<TaggedRelease>> {
+    let total_per_page = 10;
+    let page = 1;
+    let github_releases = get_github_releases(&file.owner, &file.repo, total_per_page, page).await?;
+    let mut releases: Vec<TaggedRelease> = vec![];
     for github_release in &github_releases {
         for asset in &github_release.assets {
-            if asset.name.as_str().cmp("yt-dlp.exe") == Ordering::Equal {
-                let release = YtdlpRelease {
+            if file.filename.compare(&asset.name) {
+                let release = TaggedRelease {
                     tag_name: github_release.tag_name.clone(),
+                    asset_name: asset.name.clone(),
+                    filesize_bytes: asset.size,
                     browser_download_url: asset.browser_download_url.clone(),
                     created_at: asset.created_at.clone(),
                     updated_at: asset.updated_at.clone(),
@@ -54,29 +83,15 @@ pub async fn get_ytdlp_releases() -> anyhow::Result<Vec<YtdlpRelease>> {
             }
         }
     }
+    releases.sort_by_key(|e| std::cmp::Reverse(e.filesize_bytes));
     releases.sort_by_key(|e| std::cmp::Reverse(e.updated_at.0));
     Ok(releases)
 }
 
-#[actix_web::main]
-async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    let total_transcode_threads: usize = match args.total_transcode_threads {
-        0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
-        x => x,
-    };
-
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "INFO");
-    }
-    env_logger::init();
-
-    let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
-    app_config.total_transcode_threads = total_transcode_threads;
-
-    let releases = get_ytdlp_releases().await?;
+async fn download_file(tagged_asset: &TaggedAsset, output_path: &Path) -> anyhow::Result<()> {
+    let releases = get_tagged_release(tagged_asset).await?;
     let release = releases.first().ok_or(anyhow::anyhow!("No releases available"))?;
-    log::info!("Found release: {:?}", release);
+    log::info!("Selected release: tag='{0}' name='{1}'", &release.tag_name, &release.asset_name);
 
     let client = reqwest::Client::new();
     let response = client
@@ -100,8 +115,7 @@ async fn main() -> anyhow::Result<()> {
     use std::fs::File;
     use std::io::Write;
 
-    let ytdlp_binary_path = app_config.binaries_folder.join("yt-dlp.exe");
-    let mut file = File::create(&ytdlp_binary_path).context("Failed to open ytdlp binary path")?;
+    let mut file = File::create(output_path).context("Failed to open output path")?;
 
     let mut total_downloaded_bytes: u64 = 0;
     let mut stream_bytes = response.bytes_stream();
@@ -114,5 +128,127 @@ async fn main() -> anyhow::Result<()> {
     }
     drop(file);
     progress_bar.finish();
+    Ok(())
+}
+
+async fn download_files(app_config: &AppConfig) -> anyhow::Result<()> {
+    download_file(
+        &TaggedAsset {
+            owner: "yt-dlp".to_owned(),
+            repo: "yt-dlp".to_owned(),
+            filename: TaggedFilename::String("yt-dlp.exe".to_owned()),
+        },
+        &app_config.binaries_folder.join("yt-dlp.exe"),
+    ).await?;
+
+    download_file(
+        &TaggedAsset {
+            owner: "ip7z".to_owned(),
+            repo: "7zip".to_owned(),
+            filename: TaggedFilename::String("7zr.exe".to_owned()),
+        },
+        &app_config.binaries_folder.join("7zr.exe"),
+    ).await?;
+
+
+    lazy_static! {
+        static ref EXTRA_7ZIP_FILENAME_REGEX: Regex = Regex::new(
+            r"7z.*extra.*\.7z"
+        ).unwrap();
+    }
+
+    download_file(
+        &TaggedAsset {
+            owner: "ip7z".to_owned(),
+            repo: "7zip".to_owned(),
+            filename: TaggedFilename::Regex(EXTRA_7ZIP_FILENAME_REGEX.clone()),
+        },
+        &app_config.binaries_folder.join("7z-extra.7z"),
+    ).await?;
+
+    lazy_static! {
+        static ref FFMPEG_WIN64_FILENAME_REGEX: Regex = Regex::new(
+            r"ffmpeg.*win64.*gpl.*\.zip"
+        ).unwrap();
+    }
+
+    // https://www.ffmpeg.org/download.html#build-windows
+    download_file(
+        &TaggedAsset {
+            owner: "BtbN".to_owned(),
+            repo: "FFmpeg-Builds".to_owned(),
+            filename: TaggedFilename::Regex(FFMPEG_WIN64_FILENAME_REGEX.clone()),
+        },
+        &app_config.binaries_folder.join("ffmpeg.zip"),
+    ).await?;
+
+    Ok(())
+}
+
+async fn extract_files(app_config: &AppConfig) -> anyhow::Result<()> {
+    use std::process::Command;
+    let zip_minimal_executable_path = app_config.binaries_folder.join("7zr.exe")
+        .canonicalize()
+        .context("Failed to find 7zip minimal executable path")?;
+    let zip_extras_archive_path = app_config.binaries_folder.join("7z-extra.7z")
+        .canonicalize()
+        .context("Failed to find 7zip extra archive path")?;
+
+    let output = Command::new(&zip_minimal_executable_path)
+        .arg("e")
+        .arg("-y")
+        .arg(&zip_extras_archive_path)
+        .arg("7za.exe")
+        .current_dir(&app_config.binaries_folder)
+        .output()
+        .context("Failed to unzip 7zip minimal executable")?;
+    if !output.status.success() {
+        let stderr = str::from_utf8(&output.stderr).expect("Failed to read stderr as string");
+        return Err(anyhow::anyhow!("Failed to unzip 7zip minimal executable: {stderr}"));
+    }
+    log::info!("Unzipped 7zip extras executable");
+
+    let zip_extras_executable_path = app_config.binaries_folder.join("7za.exe")
+        .canonicalize()
+        .context("Failed to find 7zip extras executable path")?;
+    let ffmpeg_archive_path = app_config.binaries_folder.join("ffmpeg.zip")
+        .canonicalize()
+        .context("Failed to find ffmpeg archive path")?;
+    let output = Command::new(&zip_extras_executable_path)
+        .arg("e")
+        .arg("-y")
+        .arg(&ffmpeg_archive_path)
+        .arg("*/bin/ffmpeg.exe")
+        .current_dir(&app_config.binaries_folder)
+        .output()
+        .context("Failed to unzip ffmpeg minimal executable")?;
+    if !output.status.success() {
+        let stderr = str::from_utf8(&output.stderr).expect("Failed to read stderr as string");
+        return Err(anyhow::anyhow!("Failed to unzip ffmpeg executable: {stderr}"));
+    }
+    log::info!("Unzipped ffmpeg executable");
+
+    Ok(())
+}
+
+#[actix_web::main]
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let total_transcode_threads: usize = match args.total_transcode_threads {
+        0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
+        x => x,
+    };
+
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "INFO");
+    }
+    env_logger::init();
+
+    let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
+    app_config.total_transcode_threads = total_transcode_threads;
+
+    download_files(&app_config).await?;
+    extract_files(&app_config).await?;
+
     Ok(())
 }
