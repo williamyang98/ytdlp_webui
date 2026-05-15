@@ -1,40 +1,16 @@
 use anyhow::Context;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Condvar};
-use thiserror::Error;
+use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 use dashmap::DashMap;
 use crate::{
-    database::{DatabasePool, VideoId, open_database, create_database},
-    metadata::{MetadataCache, Metadata},
+    database::{Database, VideoId},
+    youtube_metadata::{YoutubeMetadataCache, YoutubeMetadata, get_youtube_metadata},
+    workers::{WorkerCacheEntry, WorkerThreadPool},
     worker_download::{DownloadCache, DownloadState},
     worker_transcode::{TranscodeCache, TranscodeKey, TranscodeState},
 };
 
-pub type WorkerThreadPool = Arc<Mutex<ThreadPool>>;
-pub type WorkerCacheEntry<T> = Arc<(Mutex<T>, Condvar)>;
-
-#[derive(Debug,Error)]
-pub enum WorkerError {
-    #[error("Failed to create stdout log: {0:?}")]
-    StdoutLogCreate(std::io::Error),
-    #[error("Failed to create stderr log: {0:?}")]
-    StderrLogCreate(std::io::Error),
-    #[error("Failed to write to system log: {0:?}")]
-    SystemWriteFail(std::io::Error),
-    #[error("Failed to write to stdout log: {0:?}")]
-    StdoutWriteFail(std::io::Error),
-    #[error("Failed to write to stderr log: {0:?}")]
-    StderrWriteFail(std::io::Error),
-    #[error("Failed to acquire stdout from process")]
-    StdoutMissing,
-    #[error("Failed to acquire stderr from process")]
-    StderrMissing,
-    #[error("Failed to join stdout thread: {0:?}")]
-    StdoutThreadJoin(Box<dyn std::any::Any + Send + 'static>),
-    #[error("Failed to join stderr thread: {0:?}")]
-    StderrThreadJoin(Box<dyn std::any::Any + Send + 'static>),
-}
 
 #[derive(Clone,Debug)]
 pub struct AppConfig {
@@ -82,33 +58,42 @@ impl AppConfig {
 }
 
 #[derive(Clone)]
-pub struct AppState {
+pub struct App {
     pub app_config: Arc<AppConfig>,
-    pub db_pool: DatabasePool,
+    pub database: Arc<Database>,
     pub worker_thread_pool: WorkerThreadPool,
     pub download_cache: DownloadCache,
     pub transcode_cache: TranscodeCache,
-    pub metadata_cache: MetadataCache,
+    pub metadata_cache: YoutubeMetadataCache,
 }
 
-impl AppState {
+impl App {
     pub fn new(app_config: AppConfig) -> anyhow::Result<Self> {
-        let db_pool = open_database(app_config.database_path.to_string_lossy().as_ref())?;
-        {
-            let mut db_conn = db_pool.get()?;
-            create_database(&mut db_conn);
-        }
+        let database = Database::open(app_config.database_path.to_string_lossy().as_ref())?;
+        let database = Arc::new(database);
+        database.connect()?.run_pending_migrations();
+
         let worker_thread_pool: WorkerThreadPool = Arc::new(Mutex::new(ThreadPool::new(app_config.total_transcode_threads)));
         let download_cache: DownloadCache = Arc::new(DashMap::<VideoId, WorkerCacheEntry<DownloadState>>::new());
         let transcode_cache: TranscodeCache = Arc::new(DashMap::<TranscodeKey, WorkerCacheEntry<TranscodeState>>::new());
-        let metadata_cache: MetadataCache = Arc::new(DashMap::<VideoId, Arc<Metadata>>::new());
+        let metadata_cache: YoutubeMetadataCache = Arc::new(DashMap::<VideoId, Arc<YoutubeMetadata>>::new());
         Ok(Self {
             app_config: Arc::new(app_config),
-            db_pool,
+            database,
             worker_thread_pool,
             download_cache,
             transcode_cache,
             metadata_cache,
         })
+    }
+
+    pub async fn get_youtube_metadata_from_cache(&self, video_id: VideoId) -> anyhow::Result<Arc<YoutubeMetadata>> {
+        if let Some(metadata) = self.metadata_cache.get(&video_id) {
+            return Ok(metadata.clone());
+        }
+        let metadata = get_youtube_metadata(&video_id).await?;
+        let metadata = Arc::new(metadata);
+        self.metadata_cache.insert(video_id, metadata.clone());
+        Ok(metadata)
     }
 }

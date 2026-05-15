@@ -3,7 +3,7 @@ use dashmap::DashMap;
 use serde::{Serialize,Deserialize};
 use crate::database::VideoId;
 
-pub type MetadataCache = Arc<DashMap<VideoId, Arc<Metadata>>>;
+pub type YoutubeMetadataCache = Arc<DashMap<VideoId, Arc<YoutubeMetadata>>>;
 
 pub fn get_metadata_url(video_id: &str) -> String {
     const URL: &str = "https://www.googleapis.com/youtube/v3/videos";
@@ -67,7 +67,7 @@ pub struct PageInfo {
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
-pub struct Metadata {
+pub struct YoutubeMetadata {
     pub kind: String,
     pub etag: String,
     #[serde(default)]
@@ -76,15 +76,10 @@ pub struct Metadata {
     pub page_info: PageInfo,
 }
 
-pub async fn get_metadata_from_cache(video_id: VideoId, cache: MetadataCache) -> anyhow::Result<Arc<Metadata>> {
-    if let Some(metadata) = cache.get(&video_id) {
-        return Ok(metadata.clone());
-    }
+pub async fn get_youtube_metadata(video_id: &VideoId) -> anyhow::Result<YoutubeMetadata> {
     let metadata_url = get_metadata_url(video_id.as_str());
     let response = reqwest::get(metadata_url).await?;
     let metadata = response.text().await?;
-    let metadata: Metadata = serde_json::from_str(metadata.as_str())?;
-    let metadata = Arc::new(metadata);
-    cache.insert(video_id, metadata.clone());
+    let metadata: YoutubeMetadata = serde_json::from_str(metadata.as_str())?;
     Ok(metadata)
 }

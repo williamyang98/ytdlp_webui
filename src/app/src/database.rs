@@ -24,7 +24,6 @@ use serde::Serialize;
 use thiserror::Error;
 
 pub type DatabasePool = r2d2::Pool<r2d2::ConnectionManager<SqliteConnection>>;
-pub type DatabaseConnection = SqliteConnection;
 pub type DatabasePoolError = r2d2::PoolError;
 pub type DatabaseError = diesel::result::Error;
 pub type DatabaseResult<T> = Result<T, DatabaseError>;
@@ -216,8 +215,8 @@ pub struct SqliteConnectionOptions {
     pub busy_timeout: Option<Duration>,
 }
 
-impl diesel::r2d2::CustomizeConnection<DatabaseConnection, diesel::r2d2::Error> for SqliteConnectionOptions {
-    fn on_acquire(&self, db_conn: &mut DatabaseConnection) -> Result<(), diesel::r2d2::Error> {
+impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnectionOptions {
+    fn on_acquire(&self, db_conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
         use diesel::r2d2::Error::QueryError;
         // https://sqlite.org/wal.html
         // WAL mode provides more concurrency as readers do not block writers and a writer does not block readers. Reading and writing can proceed concurrently
@@ -244,135 +243,148 @@ impl diesel::r2d2::CustomizeConnection<DatabaseConnection, diesel::r2d2::Error> 
     }
 }
 
-pub fn open_database(url: &str) -> anyhow::Result<DatabasePool> {
-    let manager = r2d2::ConnectionManager::<SqliteConnection>::new(url);
-    let connection_timeout = Duration::from_secs(30);
-    r2d2::Pool::builder()
-        .max_size(10)
-        .connection_timeout(connection_timeout)
-        .connection_customizer(Box::new(SqliteConnectionOptions {
-            enable_write_ahead_logging_mode: true,
-            enable_foreign_keys: false,
-            busy_timeout: Some(connection_timeout),
-        }))
-        .build(manager)
-        .context("Could not build connection pool")
+pub struct Database {
+    connection_pool: DatabasePool,
+}
+
+pub struct DatabaseConnection(r2d2::PooledConnection<r2d2::ConnectionManager<SqliteConnection>>);
+
+impl Database {
+    pub fn open(url: &str) -> anyhow::Result<Self> {
+        let manager = r2d2::ConnectionManager::<SqliteConnection>::new(url);
+        let connection_timeout = Duration::from_secs(30);
+        let connection_pool = r2d2::Pool::builder()
+            .max_size(10)
+            .connection_timeout(connection_timeout)
+            .connection_customizer(Box::new(SqliteConnectionOptions {
+                enable_write_ahead_logging_mode: true,
+                enable_foreign_keys: false,
+                busy_timeout: Some(connection_timeout),
+            }))
+            .build(manager)
+            .context("Could not build connection pool")?;
+        Ok(Self {
+            connection_pool,
+        })
+    }
+
+    pub fn connect(&self) -> Result<DatabaseConnection, DatabasePoolError> {
+        let conn = self.connection_pool.get()?;
+        Ok(DatabaseConnection(conn))
+    }
 }
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
-pub fn create_database(db_conn: &mut DatabaseConnection) {
-    db_conn.run_pending_migrations(MIGRATIONS).expect("Migration failed");
-}
+impl DatabaseConnection {
+    pub fn run_pending_migrations(&mut self) {
+        self.0.run_pending_migrations(MIGRATIONS).expect("Migration failed");
+    }
 
-// insert
-pub fn insert_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<usize> {
-    use ytdlp::dsl as e;
-    diesel::replace_into(e::ytdlp)
-        .values((
-            e::video_id.eq(video_id),
-            e::status.eq(WorkerStatus::Queued),
-            e::unix_time.eq(UnixTimestamp(get_unix_time())),
-        ))
-        .execute(db_conn)
-}
+    pub fn insert_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<usize> {
+        use ytdlp::dsl as e;
+        diesel::replace_into(e::ytdlp)
+            .values((
+                e::video_id.eq(video_id),
+                e::status.eq(WorkerStatus::Queued),
+                e::unix_time.eq(UnixTimestamp(get_unix_time())),
+            ))
+            .execute(&mut self.0)
+    }
 
-pub fn insert_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
-    use ffmpeg::dsl as e;
-    diesel::replace_into(e::ffmpeg)
-        .values((
-            e::video_id.eq(video_id),
-            e::audio_ext.eq(audio_ext),
-            e::status.eq(WorkerStatus::Queued),
-            e::unix_time.eq(UnixTimestamp(get_unix_time())),
-        ))
-        .execute(db_conn)
-}
+    pub fn insert_ffmpeg_entry(&mut self, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
+        use ffmpeg::dsl as e;
+        diesel::replace_into(e::ffmpeg)
+            .values((
+                e::video_id.eq(video_id),
+                e::audio_ext.eq(audio_ext),
+                e::status.eq(WorkerStatus::Queued),
+                e::unix_time.eq(UnixTimestamp(get_unix_time())),
+            ))
+            .execute(&mut self.0)
+    }
 
-// update
-pub fn update_ytdlp_entry(db_conn: &mut DatabaseConnection, entry: &YtdlpRow) -> DatabaseResult<usize> {
-    use ytdlp::dsl as e;
-    diesel::update(e::ytdlp)
-        .filter(e::video_id.eq(&entry.video_id))
-        .set(entry)
-        .execute(db_conn)
-}
+    // update
+    pub fn update_ytdlp_entry(&mut self, entry: &YtdlpRow) -> DatabaseResult<usize> {
+        use ytdlp::dsl as e;
+        diesel::update(e::ytdlp)
+            .filter(e::video_id.eq(&entry.video_id))
+            .set(entry)
+            .execute(&mut self.0)
+    }
 
-pub fn update_ffmpeg_entry(db_conn: &mut DatabaseConnection, entry: &FfmpegRow) -> DatabaseResult<usize> {
-    use ffmpeg::dsl as e;
-    diesel::update(e::ffmpeg)
-        .filter(e::video_id.eq(&entry.video_id))
-        .filter(e::audio_ext.eq(entry.audio_ext))
-        .set(entry)
-        .execute(db_conn)
-}
+    pub fn update_ffmpeg_entry(&mut self, entry: &FfmpegRow) -> DatabaseResult<usize> {
+        use ffmpeg::dsl as e;
+        diesel::update(e::ffmpeg)
+            .filter(e::video_id.eq(&entry.video_id))
+            .filter(e::audio_ext.eq(entry.audio_ext))
+            .set(entry)
+            .execute(&mut self.0)
+    }
 
-// delete
-pub fn delete_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<usize> {
-    use ytdlp::dsl as e;
-    diesel::delete(e::ytdlp)
-        .filter(e::video_id.eq(video_id))
-        .execute(db_conn)
-}
+    // delete
+    pub fn delete_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<usize> {
+        use ytdlp::dsl as e;
+        diesel::delete(e::ytdlp)
+            .filter(e::video_id.eq(video_id))
+            .execute(&mut self.0)
+    }
 
-pub fn delete_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
-    use ffmpeg::dsl as e;
-    diesel::delete(e::ffmpeg)
-        .filter(e::video_id.eq(video_id))
-        .filter(e::audio_ext.eq(audio_ext))
-        .execute(db_conn)
-}
+    pub fn delete_ffmpeg_entry(&mut self, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
+        use ffmpeg::dsl as e;
+        diesel::delete(e::ffmpeg)
+            .filter(e::video_id.eq(video_id))
+            .filter(e::audio_ext.eq(audio_ext))
+            .execute(&mut self.0)
+    }
 
-pub fn select_ytdlp_entries(db_conn: &mut DatabaseConnection) -> DatabaseResult<Vec<YtdlpRow>> {
-    use ytdlp::dsl as e;
-    e::ytdlp.load::<YtdlpRow>(db_conn)
-}
+    pub fn select_ytdlp_entries(&mut self) -> DatabaseResult<Vec<YtdlpRow>> {
+        use ytdlp::dsl as e;
+        e::ytdlp.load::<YtdlpRow>(&mut self.0)
+    }
 
-pub fn select_ytdlp_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId) -> DatabaseResult<Option<YtdlpRow>> {
-    use ytdlp::dsl as e;
-    e::ytdlp
-        .filter(e::video_id.eq(video_id))
-        .first::<YtdlpRow>(db_conn)
-        .optional()
-}
+    pub fn select_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<Option<YtdlpRow>> {
+        use ytdlp::dsl as e;
+        e::ytdlp
+            .filter(e::video_id.eq(video_id))
+            .first::<YtdlpRow>(&mut self.0)
+            .optional()
+    }
 
-pub fn select_ffmpeg_entries(db_conn: &mut DatabaseConnection) -> DatabaseResult<Vec<FfmpegRow>> {
-    use ffmpeg::dsl as e;
-    e::ffmpeg.select(FfmpegRow::as_select())
-        .load(db_conn)
-}
+    pub fn select_ffmpeg_entries(&mut self) -> DatabaseResult<Vec<FfmpegRow>> {
+        use ffmpeg::dsl as e;
+        e::ffmpeg.select(FfmpegRow::as_select())
+            .load(&mut self.0)
+    }
 
-pub fn select_ffmpeg_entry(db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<Option<FfmpegRow>> {
-    use ffmpeg::dsl as e;
-    e::ffmpeg
-        .filter(e::video_id.eq(video_id))
-        .filter(e::audio_ext.eq(audio_ext))
-        .first::<FfmpegRow>(db_conn)
-        .optional()
-}
+    pub fn select_ffmpeg_entry(&mut self, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<Option<FfmpegRow>> {
+        use ffmpeg::dsl as e;
+        e::ffmpeg
+            .filter(e::video_id.eq(video_id))
+            .filter(e::audio_ext.eq(audio_ext))
+            .first::<FfmpegRow>(&mut self.0)
+            .optional()
+    }
 
-// select and update
-pub fn select_and_update_ytdlp_entry<F>(
-    db_conn: &mut DatabaseConnection, video_id: &VideoId, callback: F,
-) -> DatabaseResult<usize>
-where F: FnOnce(&mut YtdlpRow)
-{
-    let entry = select_ytdlp_entry(db_conn, video_id)?;
-    let Some(mut entry) = entry else {
-        return Ok(0);
-    };
-    callback(&mut entry);
-    update_ytdlp_entry(db_conn, &entry)
-}
+    // select and update
+    pub fn select_and_update_ytdlp_entry<F>(&mut self, video_id: &VideoId, callback: F) -> DatabaseResult<usize>
+    where F: FnOnce(&mut YtdlpRow)
+    {
+        let entry = self.select_ytdlp_entry(video_id)?;
+        let Some(mut entry) = entry else {
+            return Ok(0);
+        };
+        callback(&mut entry);
+        self.update_ytdlp_entry(&entry)
+    }
 
-pub fn select_and_update_ffmpeg_entry<F>(
-    db_conn: &mut DatabaseConnection, video_id: &VideoId, audio_ext: AudioExtension, callback: F,
-) -> DatabaseResult<usize> 
-where F: FnOnce(&mut FfmpegRow)
-{
-    let entry = select_ffmpeg_entry(db_conn, video_id, audio_ext)?;
-    let Some(mut entry) = entry else {
-        return Ok(0);
-    };
-    callback(&mut entry);
-    update_ffmpeg_entry(db_conn, &entry)
+    pub fn select_and_update_ffmpeg_entry<F>(&mut self, video_id: &VideoId, audio_ext: AudioExtension, callback: F) -> DatabaseResult<usize> 
+    where F: FnOnce(&mut FfmpegRow)
+    {
+        let entry = self.select_ffmpeg_entry(&video_id, audio_ext)?;
+        let Some(mut entry) = entry else {
+            return Ok(0);
+        };
+        callback(&mut entry);
+        self.update_ffmpeg_entry(&entry)
+    }
 }

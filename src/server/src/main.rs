@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
-use actix_web::{middleware, web, App, HttpServer};
+use actix_web::{middleware, web, App as ActixApp, HttpServer};
 use clap::Parser;
-use app::app::{AppConfig, AppState};
+use app::app::{App, AppConfig};
 use server::routes;
 
 #[derive(Parser, Debug)]
@@ -54,13 +54,13 @@ async fn main() -> anyhow::Result<()> {
     };
     let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
     app_config.total_transcode_threads = total_transcode_threads;
-    let app_state = AppState::new(app_config)?;
-    let app_state = Arc::new(app_state);
+    let app = App::new(app_config)?;
+    let app = Arc::new(app);
     // start server
     const API_PREFIX: &str = "/api/v1";
     HttpServer::new(move || {
-        App::new()
-            .app_data(app_state.clone())
+        ActixApp::new()
+            .app_data(app.clone())
             .service(web::scope(API_PREFIX)
                 .service(routes::request_transcode)
                 .service(routes::delete_transcode)
