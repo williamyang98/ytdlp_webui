@@ -1,0 +1,44 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+/* Avoid adding a scrollbar when sidebar is open which causes layout shift */
+:where(:root:has(.drawer:not(.drawer-open) > .drawer-toggle:checked )) {
+  scrollbar-gutter: initial;
+}
+
+.drawer-side {
+  transition: opacity 0.05s ease-out 0.05s allow-discrete, visibility 0.05s ease-out 0.05s allow-discrete;
+}
+
+/* Fix selected form fields being ontop of tooltip */
+.tooltip {
+  > .tooltip-content, &[data-tip]:before {
+    z-index: 2;
+  }
+}
+
+/* reduce padding of regular table (table-sm reduces text size which is undesirable) */
+.table.table-compact {
+  :where(th, td) {
+    padding-inline: calc(var(--spacing)*2);
+    padding-block: calc(var(--spacing)*2);
+  }
+}
+
+/* reduce animation time for ui controls */
+.checkbox {
+  transition: background-color 0.01s, box-shadow 0.01s;
+}
+
+.checkbox {
+  &:before {
+    transition: clip-path 0.03s, opacity 0.01s, rotate 0.03s, translate 0.03s;
+    transition-delay: 0.01s;
+  }
+}
+
+.btn {
+  transition-duration: 0.02s;
+}
