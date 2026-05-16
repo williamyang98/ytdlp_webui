@@ -1,4 +1,5 @@
 use std::{path::PathBuf, sync::Arc};
+use actix_cors::Cors;
 use actix_web::{middleware, web, App as ActixApp, HttpServer};
 use clap::Parser;
 use app::app_config::AppConfig;
@@ -26,6 +27,9 @@ struct Args {
     /// Static website folder
     #[arg(long, default_value = "./static", value_parser = validate_is_directory_empty_or_exists)]
     static_folder: PathBuf,
+    /// Enable cross origin resource sharing (CORS)
+    #[arg(long)]
+    enable_cors: bool,
 }
 
 fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
@@ -58,9 +62,25 @@ async fn main() -> anyhow::Result<()> {
     let app = App::new(app_config.clone())?;
     let app = Arc::new(app);
     // start server
+    if args.enable_cors {
+        log::info!("Enabling CORS");
+    }
     const API_PREFIX: &str = "/api/v1";
     HttpServer::new(move || {
+        // enable cross origin resource sharing (CORS)
+        let mut cors = Cors::default();
+        if args.enable_cors {
+            cors = cors
+                .allowed_origin("http://localhost")
+                .allowed_origin_fn(|origin, _req_head| {
+                    origin.as_bytes().starts_with(b"http://localhost:")
+                })
+                .allow_any_header()
+                .allow_any_method()
+                .expose_any_header();
+        }
         ActixApp::new()
+            .wrap(cors)
             .app_data(app.clone())
             .service(web::scope(API_PREFIX)
                 .service(routes::request_transcode)

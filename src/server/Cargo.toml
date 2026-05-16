@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-cors = { workspace = true }
 actix-files = { workspace = true }
 actix-web = { workspace = true }
 anyhow = { workspace = true }
