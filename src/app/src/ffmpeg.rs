@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 use lazy_static::lazy_static;
 use regex::Regex;
 use thiserror::Error;
@@ -228,7 +228,7 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
 }
 
 pub fn create_ffmpeg_transcode_arguments(
-    input_path: &PathBuf, output_path: &PathBuf,
+    input_path: &Path, output_path: &Path,
     video_id: &VideoId, audio_ext: AudioExtension,
     metadata: Option<&YoutubeMetadata>,
 ) -> Vec<String> {

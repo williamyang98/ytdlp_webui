@@ -11,7 +11,7 @@ use serde::Serialize;
 use threadpool::ThreadPool;
 use anyhow::Context;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -355,8 +355,8 @@ impl TranscodeWorkers {
 
 fn create_transcode_command(
     key: &TranscodeKey,
-    input_path: &PathBuf,
-    output_path: &PathBuf,
+    input_path: &Path,
+    output_path: &Path,
     metadata: Option<&YoutubeMetadata>,
     app_config: &AppConfig,
 ) -> anyhow::Result<Command> {

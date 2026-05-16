@@ -7,7 +7,7 @@ use crate::youtube_metadata::{YoutubeMetadata, YoutubeMetadataCache, get_youtube
 use dashmap::DashMap;
 use serde::Serialize;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use threadpool::ThreadPool;
 
@@ -15,7 +15,7 @@ use threadpool::ThreadPool;
 pub struct App {
     app_config: Arc<AppConfig>,
     database: Arc<Database>,
-    threadpool: Arc<ThreadPool>,
+    _threadpool: Arc<ThreadPool>,
     transcode_workers: Arc<TranscodeWorkers>,
     download_workers: Arc<DownloadWorkers>,
     metadata_cache: YoutubeMetadataCache,
@@ -51,7 +51,7 @@ impl App {
         Ok(Self {
             app_config,
             database,
-            threadpool,
+            _threadpool: threadpool,
             download_workers,
             transcode_workers,
             metadata_cache,
@@ -65,7 +65,7 @@ impl App {
 
         // load from filepath
         let filepath = self.app_config.metadata_folder.join(format!("{0}.json", video_id.as_str()));
-        let load_from_filepath = |path: &PathBuf| -> anyhow::Result<Option<YoutubeMetadata>> {
+        let load_from_filepath = |path: &Path| -> anyhow::Result<Option<YoutubeMetadata>> {
             if !path.exists() {
                 log::debug!("Metadata cache miss from disk: {0}", path.to_string_lossy());
                 return Ok(None);
@@ -85,7 +85,7 @@ impl App {
             },
         };
 
-        let write_to_filepath = |path: &PathBuf, metadata: &YoutubeMetadata| -> anyhow::Result<()> {
+        let write_to_filepath = |path: &Path, metadata: &YoutubeMetadata| -> anyhow::Result<()> {
             let mut file = std::fs::File::create(path)?;
             let data = serde_json::to_string(metadata)?;
             file.write_all(data.as_bytes())?;

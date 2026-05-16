@@ -1,5 +1,5 @@
 use anyhow::Context;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 
 #[derive(Clone,Debug)]
@@ -16,16 +16,16 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn new(data_folder: &PathBuf, static_folder: &PathBuf) -> anyhow::Result<Self> {
+    pub fn new(data_folder: &Path, static_folder: &Path) -> anyhow::Result<Self> {
         let data_folder = data_folder.to_path_buf();
         let static_folder = static_folder.to_path_buf();
 
-        let get_absolute_dirpath = |dirpath: PathBuf| -> anyhow::Result<PathBuf> {
-            std::path::absolute(&dirpath)
+        let get_absolute_dirpath = |dirpath: &Path| -> anyhow::Result<PathBuf> {
+            std::path::absolute(dirpath)
                 .with_context(|| format!("Failed to get absolute dirpath from: {0}", dirpath.to_string_lossy()))
         };
-        let data_folder = get_absolute_dirpath(data_folder.to_path_buf())?;
-        let static_folder = get_absolute_dirpath(static_folder.to_path_buf())?;
+        let data_folder = get_absolute_dirpath(&data_folder.to_path_buf())?;
+        let static_folder = get_absolute_dirpath(&static_folder.to_path_buf())?;
 
         let downloads_folder = data_folder.join("downloads");
         let transcodes_folder = data_folder.join("transcodes");
@@ -35,7 +35,7 @@ impl AppConfig {
         let current_working_directory = std::env::current_dir()
             .context("Couldn't get current working directory of process")?;
 
-        let create_folder = |folder: &PathBuf| -> anyhow::Result<()> {
+        let create_folder = |folder: &Path| -> anyhow::Result<()> {
             std::fs::create_dir_all(folder)
                 .with_context(|| format!("Couldn't create folder: {0}", folder.to_string_lossy()))
         };
@@ -69,7 +69,7 @@ impl AppConfig {
         })
     }
 
-    pub fn get_relative_data_path(&self, absolute_path: &PathBuf) -> anyhow::Result<PathBuf> {
+    pub fn get_relative_data_path(&self, absolute_path: &Path) -> anyhow::Result<PathBuf> {
         let relative_path = match absolute_path.strip_prefix(&self.data_folder) {
             Ok(path) => path,
             Err(err) => {
@@ -82,7 +82,7 @@ impl AppConfig {
         Ok(relative_path.to_path_buf())
     }
 
-    pub fn get_absolute_binary_filepath(&self, relative_filepath: &PathBuf) -> anyhow::Result<PathBuf> {
+    pub fn get_absolute_binary_filepath(&self, relative_filepath: &Path) -> anyhow::Result<PathBuf> {
         let absolute_filepath = self.binaries_folder.join(relative_filepath);
         let absolute_filepath = std::path::absolute(&absolute_filepath)
             .with_context(|| format!("Failed to get absolute binary filepath from: {0}", absolute_filepath.to_string_lossy()))?;
@@ -92,7 +92,7 @@ impl AppConfig {
         Ok(absolute_filepath)
     }
 
-    pub fn get_absolute_data_filepath(&self, relative_filepath: &PathBuf) -> anyhow::Result<PathBuf> {
+    pub fn get_absolute_data_filepath(&self, relative_filepath: &Path) -> anyhow::Result<PathBuf> {
         let absolute_filepath = self.data_folder.join(relative_filepath);
         let absolute_filepath = std::path::absolute(&absolute_filepath)
             .with_context(|| format!("Failed to get absolute data filepath from: {0}", absolute_filepath.to_string_lossy()))?;
