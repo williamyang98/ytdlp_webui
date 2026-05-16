@@ -123,7 +123,7 @@ impl ProcessPipeHandler for YtdlpStdoutHandler {
                 *self.download_path.lock().unwrap() = Some(path);
             },
         }
-        return ControlFlow::Continue(());
+        ControlFlow::Continue(())
     }
 
     fn finish(&self) {
@@ -205,7 +205,7 @@ impl DownloadWorkers {
         let worker = Arc::new(DownloadWorker::new(video_id.clone()));
         let _old_worker = self.cache.insert(video_id.clone(), worker.clone());
         // check database item
-        if let Some(db_entry) = self.database.connect()?.select_ytdlp_entry(&video_id)? {
+        if let Some(db_entry) = self.database.connect()?.select_ytdlp_entry(video_id)? {
             if db_entry.status == WorkerStatus::Finished {
                 if let Some(audio_path) = db_entry.audio_path {
                     let audio_path = self.app_config.data_folder.join(audio_path);
@@ -227,9 +227,9 @@ impl DownloadWorkers {
         // new database item
         {
             let mut db_conn = self.database.connect()?;
-            db_conn.delete_ytdlp_entry(&video_id)?;
-            db_conn.insert_ytdlp_entry(&video_id)?;
-            db_conn.select_and_update_ytdlp_entry(&video_id, |entry| {
+            db_conn.delete_ytdlp_entry(video_id)?;
+            db_conn.insert_ytdlp_entry(video_id)?;
+            db_conn.select_and_update_ytdlp_entry(video_id, |entry| {
                 entry.status = WorkerStatus::Queued;
                 entry.unix_time = get_unix_time().into();
             })?;
@@ -242,7 +242,7 @@ impl DownloadWorkers {
             let worker = worker.clone();
             move || -> anyhow::Result<()> {
                 // setup process
-                let log_dirpath = app_config.downloads_folder.join(format!("{0}", video_id.as_str()));
+                let log_dirpath = app_config.downloads_folder.join(video_id.as_str().to_string());
                 let mut process = ProcessWorker::new(threadpool.clone(), log_dirpath);
                 process.label = Some(format!("download_{0}", video_id.as_str()));
                 let command = create_download_command(&video_id, &app_config)?;
@@ -267,8 +267,7 @@ impl DownloadWorkers {
                 // NOTE: Audio extractor for yt-dlp might not extract anything if the file extension remains the same
                 let download_filepath: Option<String> = stdout_handler.download_path.lock().unwrap().clone();
                 let extract_filepath: Option<String> = stderr_handler.extract_path.lock().unwrap().as_mut()
-                    .map(|res| res.as_ref().ok().cloned())
-                    .flatten();
+                    .and_then(|res| res.as_ref().ok().cloned());
                 if let Some(filepath) = &download_filepath {
                     log::debug!("Got ytdlp download filepath: {0}", filepath);
                 }

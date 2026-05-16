@@ -88,7 +88,7 @@ impl<V,E> ProcessPipeFence<V,E> {
         while value.is_none() {
             value = self.condvar.wait(value).unwrap();
         }
-        return value.take().expect("Expected result from process pipe result");
+        value.take().expect("Expected result from process pipe result")
     }
 
     fn update(&self, new_value: Result<V,E>) {

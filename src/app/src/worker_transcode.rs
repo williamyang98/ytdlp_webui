@@ -156,7 +156,7 @@ impl ProcessPipeHandler for FfmpegStderrHandler {
                 self.worker.state.lock().unwrap().update_from_progress(progress);
             },
         }
-        return ControlFlow::Continue(());
+        ControlFlow::Continue(())
     }
 
     fn finish(&self) {
@@ -203,7 +203,7 @@ impl TranscodeWorkers {
             return Err(anyhow::anyhow!("Transcode worker failed because download worker failed: {0}", key.as_str()));
         }
         // check cache hit
-        if let Some(worker) = self.cache.get(&key) {
+        if let Some(worker) = self.cache.get(key) {
             let state = worker.state.lock().unwrap();
             if state.worker_status.is_healthy() {
                 return Ok(worker.clone());
@@ -213,7 +213,7 @@ impl TranscodeWorkers {
         let worker = Arc::new(TranscodeWorker::new(key.clone()));
         let _old_worker = self.cache.insert(key.clone(), worker.clone());
         // check database item
-        if let Some(db_entry) = self.database.connect()?.select_ffmpeg_entry(&key)? {
+        if let Some(db_entry) = self.database.connect()?.select_ffmpeg_entry(key)? {
             if db_entry.status == WorkerStatus::Finished {
                 if let Some(audio_path) = db_entry.audio_path {
                     let audio_path = self.app_config.data_folder.join(audio_path);
@@ -235,9 +235,9 @@ impl TranscodeWorkers {
         // delete database entries
         {
             let mut db_conn = self.database.connect()?;
-            db_conn.delete_ffmpeg_entry(&key)?;
-            db_conn.insert_ffmpeg_entry(&key)?;
-            db_conn.select_and_update_ffmpeg_entry(&key, |entry| {
+            db_conn.delete_ffmpeg_entry(key)?;
+            db_conn.insert_ffmpeg_entry(key)?;
+            db_conn.select_and_update_ffmpeg_entry(key, |entry| {
                 entry.status = WorkerStatus::Queued;
                 entry.unix_time = get_unix_time().into();
             })?;

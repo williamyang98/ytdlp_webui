@@ -60,7 +60,7 @@ impl App {
         if let Some(metadata) = self.metadata_cache.get(video_id) {
             return Ok(metadata.clone());
         }
-        let metadata = get_youtube_metadata(&video_id).await?;
+        let metadata = get_youtube_metadata(video_id).await?;
         let metadata = Arc::new(metadata);
         self.metadata_cache.insert(video_id.clone(), metadata.clone());
         Ok(metadata)
@@ -76,20 +76,20 @@ impl App {
     }
 
     pub fn delete_download(&self, video_id: &VideoId) -> anyhow::Result<Option<DeleteResponse>> {
-        if let Some(worker) = self.download_workers.get_worker(&video_id) {
+        if let Some(worker) = self.download_workers.get_worker(video_id) {
             if worker.get_status().is_busy() {
                 return Ok(Some(DeleteResponse::Busy));
             }
         }
         defer(|| {
-            self.download_workers.delete_worker(&video_id);
+            self.download_workers.delete_worker(video_id);
         });
 
         let mut db_conn =self.database.connect()?;
-        let Some(entry) = db_conn.select_ytdlp_entry(&video_id)? else {
+        let Some(entry) = db_conn.select_ytdlp_entry(video_id)? else {
             return Ok(None);
         };
-        let total_deleted = db_conn.delete_ytdlp_entry(&video_id)?;
+        let total_deleted = db_conn.delete_ytdlp_entry(video_id)?;
         if total_deleted != 1 {
             log::warn!("Failed to delete ytdlp entry: {0}", video_id.as_str());
         }
@@ -114,20 +114,20 @@ impl App {
     }
 
     pub fn delete_transcode(&self, key: &TranscodeKey) -> anyhow::Result<Option<DeleteResponse>> {
-        if let Some(worker) = self.transcode_workers.get_worker(&key) {
+        if let Some(worker) = self.transcode_workers.get_worker(key) {
             if worker.get_status().is_busy() {
                 return Ok(Some(DeleteResponse::Busy));
             }
         }
         defer(|| {
-            self.transcode_workers.delete_worker(&key);
+            self.transcode_workers.delete_worker(key);
         });
 
         let mut db_conn =self.database.connect()?;
-        let Some(entry) = db_conn.select_ffmpeg_entry(&key)? else {
+        let Some(entry) = db_conn.select_ffmpeg_entry(key)? else {
             return Ok(None);
         };
-        let total_deleted = db_conn.delete_ffmpeg_entry(&key)?;
+        let total_deleted = db_conn.delete_ffmpeg_entry(key)?;
         if total_deleted != 1 {
             log::warn!("Failed to delete ffmpeg entry: {0}", key.as_str());
         }
@@ -188,7 +188,7 @@ impl App {
     }
 
     pub fn get_download_abspath(&self, key: &TranscodeKey) -> anyhow::Result<Option<PathBuf>> {
-        let entry = self.get_transcode(&key)?;
+        let entry = self.get_transcode(key)?;
         let Some(entry) = entry else {
             return Ok(None);
         };

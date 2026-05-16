@@ -246,7 +246,7 @@ pub fn create_ffmpeg_transcode_arguments(
         if !can_embed_thumbnail {
             return None;
         }
-        let metadata = metadata.clone()?;
+        let metadata = metadata?;
         let item = metadata.items.first()?;
         let mut thumbnails: Vec<Thumbnail> = item.snippet.thumbnails.values().cloned().collect();
         thumbnails.sort_by_key(|thumbnail| thumbnail.width * thumbnail.height);
