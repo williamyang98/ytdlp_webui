@@ -53,9 +53,9 @@ pub fn parse_stdout_line(line: &str) -> Option<ParsedStdoutLine> {
         static ref DOWNLOAD_PROGRESS_REGEX: Regex = Regex::new(
             r"@\[progress\]\s+eta=(\d+)?,elapsed=(\d+)?,downloaded_bytes=(\d+),total_bytes=(\d+),speed=(\d+)?",
         ).unwrap();
-        static ref OUTPUT_PATH_REGEX: Regex = Regex::new(format!(
-            r"@\[after-move-path\]\s+({0})", YOUTUBE_ID_REGEX,
-        ).as_str()).unwrap();
+        static ref OUTPUT_PATH_REGEX: Regex = Regex::new(
+            r"@\[after-move-path\]\s+(.+)",
+        ).unwrap();
     }
     let line = line.trim();
     if let Some(captures) = DOWNLOAD_PROGRESS_REGEX.captures(line) {
@@ -93,13 +93,12 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
             r"yt-dlp.exe:\s+error:\s+(.+)"
         ).unwrap();
         static ref MISSING_VIDEO_REGEX: Regex = Regex::new(format!(
-            r"ERROR:\s+\[youtube\]\s+({0}): Video unavailable", 
+            r"ERROR:\s+\[youtube\]\s+({0}): Video unavailable",
             YOUTUBE_ID_REGEX,
         ).as_str()).unwrap();
-        static ref EXTRACT_PATH_REGEX: Regex = Regex::new(format!(
-            r"\[ExtractAudio\]\s*Destination:\s*({0})", 
-            YOUTUBE_ID_REGEX,
-        ).as_str()).unwrap();
+        static ref EXTRACT_PATH_REGEX: Regex = Regex::new(
+            r"\[ExtractAudio\]\s*Destination:\s*(.+)",
+        ).unwrap();
     }
     let line = line.trim();
     if let Some(captures) = USAGE_ERROR_REGEX.captures(line) {
