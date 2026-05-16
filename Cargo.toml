@@ -9,11 +9,15 @@ anyhow = { version = "1.0.102" }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 clap = { version = "4.5.4", features = ["derive"] }
 dashmap = { version = "6.0.1" }
-derive_more = { version = "0.99.18" }
+derive_more = { version = "2.1.1", features = ["from", "debug"] }
+diesel = { version = "2.3.9", features = ["sqlite", "r2d2"] }
+diesel_migrations = { version = "2.3.2" }
+dyn-clone = { version = "1.0.20" }
 env_logger = { version = "0.11.3" }
 futures-util = { version = "0.3.32" }
 indicatif = { version = "0.18.4" }
 lazy_static = { version = "1.5.0" }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 log = { version = "0.4.22" }
 num = { version = "0.4" }
 num-derive = { version = "0.4" }

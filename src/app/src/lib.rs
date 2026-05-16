@@ -1,11 +1,12 @@
 pub mod app;
+pub mod app_config;
 pub mod database;
 pub mod ffmpeg;
 pub mod github_api;
 pub mod schema;
 pub mod util;
-pub mod workers;
 pub mod worker_download;
+pub mod worker_process;
 pub mod worker_transcode;
 pub mod youtube_metadata;
 pub mod ytdlp;

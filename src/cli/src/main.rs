@@ -1,5 +1,5 @@
 use anyhow::Context;
-use app::app::AppConfig;
+use app::app_config::AppConfig;
 use app::github_api::{DateTimeRfc3339, get_github_releases};
 use clap::Parser;
 use futures_util::StreamExt;

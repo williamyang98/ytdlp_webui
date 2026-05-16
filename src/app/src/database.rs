@@ -4,6 +4,7 @@ use crate::generate_bidirectional_binding;
 use crate::util::get_unix_time;
 use crate::schema::{ytdlp, ffmpeg};
 use anyhow::Context;
+use derive_more::From;
 use diesel::backend::Backend;
 use diesel::connection::SimpleConnection;
 use diesel::deserialize::{FromSql, FromSqlRow};
@@ -28,7 +29,7 @@ pub type DatabasePoolError = r2d2::PoolError;
 pub type DatabaseError = diesel::result::Error;
 pub type DatabaseResult<T> = Result<T, DatabaseError>;
 
-#[derive(Clone,Debug,PartialEq,Eq,Serialize,AsExpression,FromSqlRow)]
+#[derive(Clone,Debug,PartialEq,Eq,Serialize,AsExpression,FromSqlRow,From)]
 #[serde(transparent)]
 #[diesel(sql_type = BigInt)]
 pub struct UnixTimestamp(u64);
@@ -44,6 +45,16 @@ impl<DB> FromSql<BigInt, DB> for UnixTimestamp where DB: Backend, i64: FromSql<B
     fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         let v = i64::from_sql(bytes)?;
         Ok(UnixTimestamp(v as u64))
+    }
+}
+
+impl UnixTimestamp {
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+
+    pub fn current() -> Self {
+        Self(get_unix_time())
     }
 }
 
@@ -95,6 +106,7 @@ impl<DB> FromSql<Text, DB> for VideoId where DB: Backend, *const str: FromSql<Te
     }
 }
 
+
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Hash,Serialize,AsExpression,FromSqlRow)]
 #[serde(rename_all = "lowercase")]
 #[diesel(sql_type = Text)]
@@ -124,6 +136,7 @@ impl<DB> ToSql<Text, DB> for AudioExtension where DB: Backend, str: ToSql<Text, 
         self.as_str().to_sql(out)
     }
 }
+
 impl<DB> FromSql<Text, DB> for AudioExtension where DB: Backend, *const str: FromSql<Text, DB> {
     fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         type A = *const str;
@@ -134,24 +147,42 @@ impl<DB> FromSql<Text, DB> for AudioExtension where DB: Backend, *const str: Fro
     }
 }
 
+#[derive(Clone,Debug,PartialEq,Eq,Hash)]
+pub struct TranscodeKey {
+    pub video_id: VideoId,
+    pub audio_ext: AudioExtension,
+}
+
+impl TranscodeKey {
+    pub fn as_str(&self) -> String {
+        format!("{}.{}", self.video_id.as_str(), self.audio_ext.as_str())
+    }
+}
+
 #[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,FromPrimitive,ToPrimitive,AsExpression,FromSqlRow,bytemuck::NoUninit)]
 #[repr(i32)]
 #[serde(rename_all = "lowercase")]
 #[diesel(sql_type = Integer)]
 pub enum WorkerStatus {
     #[default]
-    None = 0,
-    Queued = 1,
-    Running = 2,
-    Finished = 3,
-    Failed = 4,
+    Queued = 0,
+    Running = 1,
+    Finished = 2,
+    Failed = 3,
 }
 
 impl WorkerStatus {
     pub fn is_busy(&self) -> bool {
         match self {
             WorkerStatus::Queued | WorkerStatus::Running => true,
-            WorkerStatus::None | WorkerStatus::Finished | WorkerStatus::Failed => false,
+            WorkerStatus::Finished | WorkerStatus::Failed => false,
+        }
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        match self {
+            WorkerStatus::Failed => false,
+            WorkerStatus::Queued | WorkerStatus::Finished | WorkerStatus::Running => true,
         }
     }
 }
@@ -280,27 +311,35 @@ impl DatabaseConnection {
         self.0.run_pending_migrations(MIGRATIONS).expect("Migration failed");
     }
 
-    pub fn insert_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<usize> {
+    pub fn insert_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<bool> {
         use ytdlp::dsl as e;
-        diesel::replace_into(e::ytdlp)
+        let total = diesel::replace_into(e::ytdlp)
             .values((
                 e::video_id.eq(video_id),
-                e::status.eq(WorkerStatus::Queued),
-                e::unix_time.eq(UnixTimestamp(get_unix_time())),
+                e::status.eq(WorkerStatus::default()),
+                e::unix_time.eq(UnixTimestamp::current()),
             ))
-            .execute(&mut self.0)
+            .execute(&mut self.0)?;
+        if total != 1 {
+            log::warn!("insert_ytdlp_entry inserted {total} entries instead of 1");
+        }
+        Ok(total >= 1)
     }
 
-    pub fn insert_ffmpeg_entry(&mut self, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
+    pub fn insert_ffmpeg_entry(&mut self, key: &TranscodeKey) -> DatabaseResult<bool> {
         use ffmpeg::dsl as e;
-        diesel::replace_into(e::ffmpeg)
+        let total = diesel::replace_into(e::ffmpeg)
             .values((
-                e::video_id.eq(video_id),
-                e::audio_ext.eq(audio_ext),
-                e::status.eq(WorkerStatus::Queued),
-                e::unix_time.eq(UnixTimestamp(get_unix_time())),
+                e::video_id.eq(&key.video_id),
+                e::audio_ext.eq(key.audio_ext),
+                e::status.eq(WorkerStatus::default()),
+                e::unix_time.eq(UnixTimestamp::current()),
             ))
-            .execute(&mut self.0)
+            .execute(&mut self.0)?;
+        if total != 1 {
+            log::warn!("insert_ffmpeg_entry inserted {total} entries instead of 1");
+        }
+        Ok(total >= 1)
     }
 
     // update
@@ -329,11 +368,11 @@ impl DatabaseConnection {
             .execute(&mut self.0)
     }
 
-    pub fn delete_ffmpeg_entry(&mut self, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<usize> {
+    pub fn delete_ffmpeg_entry(&mut self, key: &TranscodeKey) -> DatabaseResult<usize> {
         use ffmpeg::dsl as e;
         diesel::delete(e::ffmpeg)
-            .filter(e::video_id.eq(video_id))
-            .filter(e::audio_ext.eq(audio_ext))
+            .filter(e::video_id.eq(&key.video_id))
+            .filter(e::audio_ext.eq(key.audio_ext))
             .execute(&mut self.0)
     }
 
@@ -356,11 +395,11 @@ impl DatabaseConnection {
             .load(&mut self.0)
     }
 
-    pub fn select_ffmpeg_entry(&mut self, video_id: &VideoId, audio_ext: AudioExtension) -> DatabaseResult<Option<FfmpegRow>> {
+    pub fn select_ffmpeg_entry(&mut self, key: &TranscodeKey) -> DatabaseResult<Option<FfmpegRow>> {
         use ffmpeg::dsl as e;
         e::ffmpeg
-            .filter(e::video_id.eq(video_id))
-            .filter(e::audio_ext.eq(audio_ext))
+            .filter(e::video_id.eq(&key.video_id))
+            .filter(e::audio_ext.eq(key.audio_ext))
             .first::<FfmpegRow>(&mut self.0)
             .optional()
     }
@@ -371,18 +410,18 @@ impl DatabaseConnection {
     {
         let entry = self.select_ytdlp_entry(video_id)?;
         let Some(mut entry) = entry else {
-            return Ok(0);
+            return Err(DatabaseError::NotFound);
         };
         callback(&mut entry);
         self.update_ytdlp_entry(&entry)
     }
 
-    pub fn select_and_update_ffmpeg_entry<F>(&mut self, video_id: &VideoId, audio_ext: AudioExtension, callback: F) -> DatabaseResult<usize> 
+    pub fn select_and_update_ffmpeg_entry<F>(&mut self, key: &TranscodeKey, callback: F) -> DatabaseResult<usize>
     where F: FnOnce(&mut FfmpegRow)
     {
-        let entry = self.select_ffmpeg_entry(&video_id, audio_ext)?;
+        let entry = self.select_ffmpeg_entry(key)?;
         let Some(mut entry) = entry else {
-            return Ok(0);
+            return Err(DatabaseError::NotFound);
         };
         callback(&mut entry);
         self.update_ffmpeg_entry(&entry)

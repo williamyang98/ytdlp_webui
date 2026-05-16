@@ -1,10 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
-use dashmap::DashMap;
-use serde::{Serialize,Deserialize};
 use crate::database::VideoId;
+use dashmap::DashMap;
+use serde::{Serialize, Deserialize};
+use std::{collections::HashMap, sync::Arc};
 
 pub type YoutubeMetadataCache = Arc<DashMap<VideoId, Arc<YoutubeMetadata>>>;
 
+// TODO: Your api key got leaked dumbass, it's hitting the quota limit
 pub fn get_metadata_url(video_id: &str) -> String {
     const URL: &str = "https://www.googleapis.com/youtube/v3/videos";
     const PARTS: &str = "snippet,contentDetails";

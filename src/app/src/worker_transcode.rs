@@ -1,34 +1,19 @@
-use std::cell::RefCell;
-use std::io::{BufReader, BufWriter, BufRead, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use dashmap::DashMap;
-use serde::Serialize;
-use thiserror::Error;
-use crate::app::App;
-use crate::workers::{WorkerCacheEntry, WorkerError};
-use crate::database::{
-    DatabasePoolError, DatabaseError,
-    VideoId, AudioExtension, WorkerStatus,
-};
-use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
-use crate::youtube_metadata::{YoutubeMetadata, Thumbnail};
+use crate::app_config::AppConfig;
+use crate::database::{TranscodeKey, Database, WorkerStatus};
 use crate::ffmpeg;
-
-#[derive(Clone,Debug,PartialEq,Eq,Hash)]
-pub struct TranscodeKey {
-    pub video_id: VideoId,
-    pub audio_ext: AudioExtension,
-}
-
-impl TranscodeKey {
-    pub fn as_str(&self) -> String {
-        format!("{}.{}", self.video_id.as_str(), self.audio_ext.as_str())
-    }
-}
+use crate::util::get_unix_time;
+use crate::worker_download::DownloadWorkers;
+use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
+use crate::youtube_metadata::YoutubeMetadata;
+use dashmap::DashMap;
+use derive_more::Debug;
+use serde::Serialize;
+use threadpool::ThreadPool;
+use anyhow::Context;
+use std::ops::ControlFlow;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::{Arc, Condvar, Mutex};
 
 #[derive(Debug,Clone,Serialize)]
 pub struct TranscodeState {
@@ -50,7 +35,7 @@ impl Default for TranscodeState {
     fn default() -> Self {
         let curr_time = get_unix_time();
         Self {
-            worker_status: WorkerStatus::None,
+            worker_status: WorkerStatus::default(),
             file_cached: false,
             fail_reason: None,
             start_time_unix: curr_time,
@@ -73,7 +58,7 @@ fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
 }
 
 impl TranscodeState {
-    pub fn update_from_progress(&mut self, progress: ffmpeg::TranscodeProgress) {
+    pub fn update_from_progress(&mut self, progress: &ffmpeg::TranscodeProgress) {
         self.end_time_unix = get_unix_time();
         // NOTE: On linux the frame number is sometimes 1 for the audio stream so this check doesn't make sense
         //       Instead we only update the progress if the transcode duration is greater than the old duration
@@ -94,7 +79,7 @@ impl TranscodeState {
         update_field(&mut self.transcode_speed_factor, progress.speed_factor);
     }
 
-    pub fn update_from_source_info(&mut self, info: ffmpeg::TranscodeSourceInfo) {
+    pub fn update_from_source_info(&mut self, info: &ffmpeg::TranscodeSourceInfo) {
         self.end_time_unix = get_unix_time();
         // NOTE: we specify multiple sources including thumbnail which gives dodgy info
         //       we check for this by only updating from the longest duration source info
@@ -111,367 +96,274 @@ impl TranscodeState {
     }
 }
 
-pub type TranscodeCache = Arc<DashMap<TranscodeKey, WorkerCacheEntry<TranscodeState>>>;
-
-#[derive(Debug,Error)]
-pub enum TranscodeStartError {
-    #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] DatabasePoolError),
-    #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] DatabaseError),
+pub struct TranscodeWorker {
+    key: TranscodeKey,
+    state: Mutex<Box<TranscodeState>>,
+    condvar: Condvar,
 }
 
-#[derive(Debug,Error)]
-pub enum TranscodeError {
-    #[error("Worker error: {0}")]
-    WorkerError(#[from] WorkerError),
-    #[error("Usage error: {0}")]
-    UsageError(String),
-    #[error("Missing output transcode file: {0}")]
-    MissingOutputFile(PathBuf),
-    #[error("Download worker failed")]
-    DownloadWorkerFailed,
-    #[error("Download worker failed to provide path to downloaded file")]
-    DownloadPathMissing,
-    #[error("Missing output download file from worker: {0}")]
-    DownloadFileMissing(PathBuf),
-    #[error("Copying identically formatted download to transcode failed: {0}")]
-    CopyDownloadSameFormat(std::io::Error),
-    #[error("Error stored in system log")]
-    LoggedFail,
-    #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] DatabasePoolError),
-    #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] DatabaseError),
-}
-
-pub fn try_start_transcode_worker(key: TranscodeKey, app: Arc<App>, metadata: Option<Arc<YoutubeMetadata>>) -> Result<WorkerStatus, TranscodeStartError> {
-    let transcode_cache = app.transcode_cache.clone();
-    let app_config = app.app_config.clone();
-    let database = app.database.clone();
-    let worker_thread_pool = app.worker_thread_pool.clone();
-    // check if transcode in progress (cache hit)
-    {
-        let transcode_state = transcode_cache.entry(key.clone()).or_default();
-        let mut state = transcode_state.0.lock().unwrap();
-        match state.worker_status {
-            WorkerStatus::None | WorkerStatus::Failed => {
-                *state = TranscodeState {
-                    worker_status: WorkerStatus::Queued,
-                    ..Default::default()
-                };
-                transcode_state.1.notify_all();
-            },
-            WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(state.worker_status),
+impl TranscodeWorker {
+    fn new(key: TranscodeKey) -> Self {
+        Self {
+            key,
+            state: Mutex::new(Box::new(TranscodeState::default())),
+            condvar: Condvar::new(),
         }
     }
-    // rollback transcode cache entry if enqueue failed
-    let is_queue_success = Rc::new(RefCell::new(false));
-    let _revert_transcode_cache = defer({
-        let is_queue_success = is_queue_success.clone();
-        let key = key.clone();
-        let transcode_cache = transcode_cache.clone();
-        move || {
-            if !*is_queue_success.borrow() {
-                let transcode_state = transcode_cache.get(&key).unwrap();
-                *transcode_state.0.lock().unwrap() = TranscodeState::default();
-                transcode_state.1.notify_all();
-            }
-        }
-    });
-    {
-        let mut db_conn = database.connect()?;
-        // check if transcode finished on disk (cache miss due to reset)
-        if let Some(entry) = db_conn.select_ffmpeg_entry(&key.video_id, key.audio_ext)? {
-            if let Some(_audio_path) = entry.audio_path {
-                let status = entry.status;
-                // TODO: Check if deleted
-                // let audio_path = PathBuf::from(audio_path);
-                let transcode_state = transcode_cache.entry(key.clone()).or_default();
-                let mut state = transcode_state.0.lock().unwrap();
-                state.worker_status = status;
-                state.file_cached = true;
-                transcode_state.1.notify_all();
-                *is_queue_success.borrow_mut() = true;
-                return Ok(status);
-            }
-        }
-        // start transcode worker
-        let _ = db_conn.insert_ffmpeg_entry(&key.video_id, key.audio_ext)?;
+
+    pub fn get_status(&self) -> WorkerStatus {
+        self.state.lock().unwrap().worker_status
     }
-    worker_thread_pool.lock().unwrap().execute(move || {
-        log::info!("Launching transcode process: {0}", key.as_str());
-        // setup logging
-        let system_log_path = app_config.transcodes_folder.join(format!("{}.system.log", key.as_str()));
-        let system_log_file = match std::fs::File::create(system_log_path.clone()) {
-            Ok(system_log_file) => system_log_file,
-            Err(err) => {
-                log::error!("Failed to create system log file: path={0}, err={1:?}", system_log_path.to_str().unwrap(), err);
-                return;
-            },
-        };
-        if let Ok(mut db_conn) = database.connect() {
-            let _ = db_conn.select_and_update_ffmpeg_entry(&key.video_id, key.audio_ext, |entry| {
-                entry.system_log_path = Some(system_log_path.to_str().unwrap().to_owned());
-            }).unwrap();
-        }
-        let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
-        // launch process
-        let res = enqueue_transcode_worker(key.clone(), app.clone(), metadata, system_log_writer.clone());
-        if let Err(ref err) = res {
-            let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
-        }
-        // update database
-        let (audio_path, worker_status, worker_error) = match res {
-            Ok(path) => (Some(path), WorkerStatus::Finished, None),
-            Err(err) => (None, WorkerStatus::Failed, Some(err)),
-        };
-        {
-            let mut db_conn = database.connect().unwrap();
-            let _ = db_conn.select_and_update_ffmpeg_entry(&key.video_id, key.audio_ext, |entry| {
-                entry.audio_path = audio_path.map(|p| p.to_str().unwrap().to_string());
-                entry.status = worker_status;
-            }).unwrap();
-        }
-        // NOTE: update cache so changes to database are visible to signal listeners
-        let transcode_state = transcode_cache.entry(key.clone()).or_default();
-        let mut state = transcode_state.0.lock().unwrap();
-        state.worker_status = worker_status;
-        state.fail_reason = worker_error.map(|e| e.to_string());
-        transcode_state.1.notify_all();
-    });
-    *is_queue_success.borrow_mut() = true;
-    Ok(WorkerStatus::Queued)
-}
 
-fn enqueue_transcode_worker(
-    key: TranscodeKey, app: Arc<App>, metadata: Option<Arc<YoutubeMetadata>>,
-    system_log_writer: Arc<Mutex<impl Write>>,
-) -> Result<PathBuf, TranscodeError> {
-    let download_cache = app.download_cache.clone();
-    let transcode_cache = app.transcode_cache.clone();
-    let app_config = app.app_config.clone();
-    let database = app.database.clone();
-
-    let filename = format!("{0}.{1}", key.video_id.as_str(), key.audio_ext.as_str());
-    let audio_path = app_config.transcodes_folder.join(filename.as_str());
-    // wait for download worker
-    {
-        let download_state = download_cache.entry(key.video_id.clone()).or_default().clone();
-        let mut download_lock = download_state.0.lock().unwrap();
+    pub fn wait_busy(&self) {
+        let mut state = self.state.lock().unwrap();
         loop {
-            match download_lock.worker_status {
-                WorkerStatus::Failed => return Err(TranscodeError::DownloadWorkerFailed),
-                WorkerStatus::Finished => break,
-                WorkerStatus::None | WorkerStatus::Queued | WorkerStatus::Running => {},
+            if !state.worker_status.is_busy() {
+                break;
             }
-            download_lock = download_state.1.wait(download_lock).unwrap();
+            state = self.condvar.wait(state).unwrap();
         }
     }
-    // get source file to transcode
-    let source_path: Option<String> = {
-        let mut db_conn = database.connect()?;
-        let entry = db_conn.select_ytdlp_entry(&key.video_id)?.expect("Entry should exist");
-        entry.audio_path
-    };
-    let Some(source_path) = source_path else {
-        return Err(TranscodeError::DownloadPathMissing);
-    };
-    let source_path = PathBuf::from(source_path);
-    if !source_path.exists() {
-        return Err(TranscodeError::DownloadFileMissing(source_path));
+
+    pub fn get_state(&self) -> Box<TranscodeState> {
+        self.state.lock().unwrap().clone()
     }
-    // NOTE: Don't copy since we do extra stuff like embed thumbnail and video metadata
-    // If the download path is the same format as transcode path then just copy it
-    // if source_path.file_name() == audio_path.file_name() {
-    //     let _ = std::fs::copy(source_path.clone(), audio_path.clone()).map_err(TranscodeError::CopyDownloadSameFormat)?;
-    //     writeln!(
-    //         &mut system_log_writer.lock().unwrap(), 
-    //         "Transcode has same format as download. Copying {0} to {1}", 
-    //         source_path.to_string_lossy(), audio_path.to_string_lossy(),
-    //     ).map_err(WorkerError::SystemWriteFail)?;
-    //     return Ok(audio_path);
-    // }
-    // TODO: avoid retranscodeing file if on disk already - make this an option
-    // if audio_path.exists() {
-    //     *is_transcoded.borrow_mut() = true;
-    //     return Ok(audio_path);
-    // }
-    // logging files
-    let stdout_log_path = app_config.transcodes_folder.join(format!("{}.stdout.log", key.as_str()));
-    let stderr_log_path = app_config.transcodes_folder.join(format!("{}.stderr.log", key.as_str()));
-    // spawn process
-    let process_args = {
-        let mut args = Vec::<String>::new();
-        let push_args = |args: &mut Vec<String>, values: &[&str]| {
-            args.extend(values.iter().map(|&s| s.to_owned()));
-        };
-        let push_metadata = |args: &mut Vec<String>, field: &str, value: &str| {
-            args.extend(["-metadata".to_owned(), format!("{0}={1}", field, value)]);
-        };
-        push_args(&mut args, &["-i", source_path.to_str().unwrap()]);
-        let can_embed_thumbnail = &[AudioExtension::MP3].contains(&key.audio_ext);
-        let thumbnail = || -> Option<Thumbnail> {
-            if !can_embed_thumbnail {
-                return None;
-            }
-            let metadata = metadata.clone()?;
-            let item = metadata.items.first()?;
-            let mut thumbnails: Vec<Thumbnail> = item.snippet.thumbnails.values().cloned().collect();
-            thumbnails.sort_by_key(|thumbnail| thumbnail.width * thumbnail.height);
-            thumbnails.last().cloned()
-        } ();
-        if let Some(ref thumbnail) = thumbnail {
-            push_args(&mut args, &["-i", thumbnail.url.as_str()]);
+}
+
+#[derive(Clone)]
+struct FfmpegStderrHandler {
+    worker: Arc<TranscodeWorker>,
+}
+
+impl FfmpegStderrHandler {
+    pub fn new(worker: Arc<TranscodeWorker>) -> Self {
+        Self {
+            worker,
         }
-        push_args(&mut args, &["-map", "0:a"]);
-        if thumbnail.is_some() {
-            push_args(&mut args, &["-map", "1"]);
-        }
-        push_metadata(&mut args, "video_id", key.video_id.as_str());
-        if let Some(metadata) = metadata {
-            if let Some(item) = metadata.items.first() {
-                push_metadata(&mut args, "title", item.snippet.title.as_str());
-                push_metadata(&mut args, "artist", item.snippet.channel_title.as_str());
-                push_metadata(&mut args, "description", item.snippet.description.as_str());
-                push_metadata(&mut args, "published_at", item.snippet.published_at.as_str());
-                push_args(&mut args, &["-id3v2_version", "3"]);
-                let mut thumbnails: Vec<(&String, &Thumbnail)> = item.snippet.thumbnails.iter().collect();
-                thumbnails.sort_by_key(|(_, thumbnail)| thumbnail.width * thumbnail.height);
-            }
-        }
-        if thumbnail.is_some() {
-            push_args(&mut args, &["-disposition:0", "attached_pic"]);
-        }
-        push_args(&mut args, &[
-            "-threads", "0",
-            "-progress", "-", "-y",
-            audio_path.to_str().unwrap(),
-        ]);
-        args
-    };
-    let ffmpeg_binary_path = app_config.binaries_folder.join("ffmpeg.exe");
-    let process_res = Command::new(ffmpeg_binary_path)
-        .args(process_args.as_slice())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let mut process = match process_res {
-        Ok(process) => process,
-        Err(err) => {
-            writeln!(&mut system_log_writer.lock().unwrap(), "[error] ffmpeg failed to start: {err:?}")
-                .map_err(WorkerError::SystemWriteFail)?;
-            return Err(TranscodeError::LoggedFail);
-        }
-    };
-    // update as running
-    {
-        let transcode_state = transcode_cache.get(&key).unwrap();
-        transcode_state.0.lock().unwrap().worker_status = WorkerStatus::Running;
-        transcode_state.1.notify_all();
     }
-    {
-        let mut db_conn = database.connect()?;
-        let _ = db_conn.select_and_update_ffmpeg_entry(&key.video_id, key.audio_ext, |entry| {
-            entry.status = WorkerStatus::Running;
-        })?;
-    }
-    // scrape stdout and stderr
-    let stdout_thread = thread::spawn({
-        let database = database.clone();
-        let key = key.clone();
-        let stdout_handle = process.stdout.take().ok_or(WorkerError::StdoutMissing)?;
-        let mut stdout_reader = BufReader::new(ConvertCarriageReturnToNewLine::new(stdout_handle));
-        let stdout_log_file = std::fs::File::create(stdout_log_path.clone()).map_err(WorkerError::StdoutLogCreate)?;
-        let mut stdout_log_writer = BufWriter::new(stdout_log_file);
-        {
-            let mut db_conn = database.connect()?;
-            let _ = db_conn.select_and_update_ffmpeg_entry(&key.video_id, key.audio_ext, |entry| {
-                entry.stdout_log_path = Some(stdout_log_path.to_str().unwrap().to_owned());
-            })?;
-        }
-        move || -> Result<(), WorkerError> {
-            let mut line = String::new();
-            loop {
-                match stdout_reader.read_line(&mut line) {
-                    Err(_) => break,
-                    Ok(0) => break,
-                    Ok(_) => (),
-                }
-                let _ = stdout_log_writer.write(line.as_bytes()).map_err(WorkerError::StdoutWriteFail)?;
-                line.clear();
-            }
-            Ok(())
-        }
-    });
-    let stderr_thread = thread::spawn({
-        let database = database.clone();
-        let key = key.clone();
-        let stderr_handle = process.stderr.take().ok_or(WorkerError::StderrMissing)?;
-        let mut stderr_reader = BufReader::new(ConvertCarriageReturnToNewLine::new(stderr_handle));
-        let stderr_log_file = std::fs::File::create(stderr_log_path.clone()).map_err(WorkerError::StderrLogCreate)?;
-        let mut stderr_log_writer = BufWriter::new(stderr_log_file);
-        {
-            let mut db_conn = database.connect()?;
-            let _ = db_conn.select_and_update_ffmpeg_entry(&key.video_id, key.audio_ext, |entry| {
-                entry.stderr_log_path = Some(stderr_log_path.to_str().unwrap().to_owned());
-            })?;
-        }
-        move || -> Result<(), WorkerError> {
-            let mut line = String::new();
-            loop {
-                match stderr_reader.read_line(&mut line) {
-                    Err(_) => break,
-                    Ok(0) => break,
-                    Ok(_) => (),
-                }
-                let _ = stderr_log_writer.write(line.as_bytes()).map_err(WorkerError::StderrWriteFail)?;
-                match ffmpeg::parse_stderr_line(line.as_str()) {
-                    None => (),
-                    Some(ffmpeg::ParsedStderrLine::TranscodeSourceInfo(info)) => {
-                        log::debug!("[transcode] id={0} info={info:?}", key.as_str());
-                        let transcode_state = transcode_cache.entry(key.clone()).or_default();
-                        transcode_state.0.lock().unwrap().update_from_source_info(info);
-                    },
-                    Some(ffmpeg::ParsedStderrLine::TranscodeProgress(progress)) => {
-                        log::debug!("[transcode] id={0} progress={progress:?}", key.as_str());
-                        let transcode_state = transcode_cache.entry(key.clone()).or_default();
-                        transcode_state.0.lock().unwrap().update_from_progress(progress);
-                    },
-                }
-                line.clear();
-            }
-            Ok(())
-        }
-    });
-    // shutdown threads
-    stdout_thread.join().map_err(WorkerError::StdoutThreadJoin)??;
-    stderr_thread.join().map_err(WorkerError::StderrThreadJoin)??;
-    // shutdown process
-    match process.try_wait() {
-        Ok(None) => {},
-        Ok(Some(exit_status)) => match exit_status.code() {
-            None => {},
-            Some(0) => {},
-            Some(code) => {
-                writeln!(&mut system_log_writer.lock().unwrap(), "[error] ffmpeg failed with bad code: {code:?}")
-                    .map_err(WorkerError::SystemWriteFail)?;
-                return Err(TranscodeError::LoggedFail);
+}
+
+impl ProcessPipeHandler for FfmpegStderrHandler {
+    fn read_line(&self, line: &str) -> ControlFlow<()> {
+        match ffmpeg::parse_stderr_line(line) {
+            None => (),
+            Some(ffmpeg::ParsedStderrLine::TranscodeSourceInfo(ref info)) => {
+                log::debug!("[transcode] id={0} info={1:?}", self.worker.key.as_str(), info);
+                self.worker.state.lock().unwrap().update_from_source_info(info);
             },
-        },
-        Err(err) => {
-            writeln!(&mut system_log_writer.lock().unwrap(), "[warn] ffmpeg process failed to join: {err:?}")
-                .map_err(WorkerError::SystemWriteFail)?;
-            if let Err(err) = process.kill() {
-                writeln!(&mut system_log_writer.lock().unwrap(), "[warn] ffmpeg process failed to be killed: {err:?}")
-                    .map_err(WorkerError::SystemWriteFail)?;
+            Some(ffmpeg::ParsedStderrLine::TranscodeProgress(ref progress)) => {
+                log::debug!("[transcode] id={0} progress={1:?}", self.worker.key.as_str(), progress);
+                self.worker.state.lock().unwrap().update_from_progress(progress);
+            },
+        }
+        return ControlFlow::Continue(());
+    }
+
+    fn finish(&self) {
+
+    }
+}
+
+pub struct TranscodeWorkers {
+    database: Arc<Database>,
+    threadpool: Arc<ThreadPool>,
+    app_config: Arc<AppConfig>,
+    download_workers: Arc<DownloadWorkers>,
+    cache: DashMap<TranscodeKey, Arc<TranscodeWorker>>,
+}
+
+impl TranscodeWorkers {
+    pub fn new(
+        database: Arc<Database>,
+        threadpool: Arc<ThreadPool>,
+        app_config: Arc<AppConfig>,
+        download_workers: Arc<DownloadWorkers>,
+    ) -> Self {
+        Self {
+            database,
+            threadpool,
+            app_config,
+            download_workers,
+            cache: DashMap::new(),
+        }
+    }
+    pub fn get_worker(&self, key: &TranscodeKey) -> Option<Arc<TranscodeWorker>> {
+        self.cache.get(key).as_deref().cloned()
+    }
+
+    pub fn delete_worker(&self, key: &TranscodeKey) -> Option<Arc<TranscodeWorker>> {
+        self.cache.remove(key).map(|(_key, value)| value)
+    }
+
+    pub fn start_worker(&self, key: &TranscodeKey, metadata: Option<Arc<YoutubeMetadata>>) -> anyhow::Result<Arc<TranscodeWorker>> {
+        let download_worker = self.download_workers.start_worker(&key.video_id)
+            .context(format!("Failed to get download worker while starting transcode worker: {0}", key.as_str()))?;
+        download_worker.wait_busy();
+        if download_worker.get_status() != WorkerStatus::Finished {
+            return Err(anyhow::anyhow!("Transcode worker failed because download worker failed: {0}", key.as_str()));
+        }
+        // check cache hit
+        if let Some(worker) = self.cache.get(&key) {
+            let state = worker.state.lock().unwrap();
+            if state.worker_status.is_healthy() {
+                return Ok(worker.clone());
             }
-        },
+        }
+        // new cache item
+        let worker = Arc::new(TranscodeWorker::new(key.clone()));
+        let _old_worker = self.cache.insert(key.clone(), worker.clone());
+        // check database item
+        if let Some(db_entry) = self.database.connect()?.select_ffmpeg_entry(&key)? {
+            if db_entry.status == WorkerStatus::Finished {
+                if let Some(audio_path) = db_entry.audio_path {
+                    let audio_path = self.app_config.data_folder.join(audio_path);
+                    if audio_path.is_file() {
+                        let mut state = worker.state.lock().unwrap();
+                        state.worker_status = WorkerStatus::Finished;
+                        state.file_cached = true;
+                        state.start_time_unix = db_entry.unix_time.as_u64();
+                        state.end_time_unix = db_entry.unix_time.as_u64();
+                        worker.condvar.notify_all();
+                        drop(state);
+                        return Ok(worker);
+                    } else {
+                        log::warn!("Restarting transcode because audio file was missing: {0}", audio_path.to_string_lossy());
+                    }
+                }
+            }
+        }
+        // delete database entries
+        {
+            let mut db_conn = self.database.connect()?;
+            db_conn.delete_ffmpeg_entry(&key)?;
+            db_conn.insert_ffmpeg_entry(&key)?;
+            db_conn.select_and_update_ffmpeg_entry(&key, |entry| {
+                entry.status = WorkerStatus::Queued;
+                entry.unix_time = get_unix_time().into();
+            })?;
+        }
+        let inner_runner = {
+            let key = key.clone();
+            let database = self.database.clone();
+            let app_config = self.app_config.clone();
+            let threadpool = self.threadpool.clone();
+            let worker = worker.clone();
+            let metadata = metadata.clone();
+            move || -> anyhow::Result<()> {
+                // determine audio path
+                let input_filepath: PathBuf = {
+                    let entry = database
+                        .connect()?
+                        .select_ytdlp_entry(&key.video_id)?;
+                    let entry = entry.ok_or_else(|| anyhow::anyhow!("ytdlp row entry is missing: {0}", key.video_id.as_str()))?;
+                    let audio_path = entry.audio_path.ok_or_else(|| anyhow::anyhow!("ytdlp audio path is missing: {0}", key.video_id.as_str()))?;
+                    let input_filepath = app_config.data_folder.join(audio_path);
+                    if !input_filepath.exists() {
+                        return Err(anyhow::anyhow!("Audio file is missing: {0}", input_filepath.to_string_lossy()));
+                    }
+                    if !input_filepath.is_file() {
+                        return Err(anyhow::anyhow!("Audio path isn't a file: {0}", input_filepath.to_string_lossy()));
+                    }
+                    input_filepath
+                };
+                let output_filepath = app_config.transcodes_folder.join(key.as_str());
+                let output_filepath = std::path::absolute(&output_filepath)
+                    .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
+                let relative_output_filepath = app_config.get_relative_data_path(&output_filepath)
+                    .with_context(|| format!("Failed to get relative output filepath from: {0}", output_filepath.to_string_lossy()))?;
+                // setup process
+                let log_dirpath = format!("{0}_{1}", key.video_id.as_str(), key.audio_ext.as_str());
+                let log_dirpath = app_config.transcodes_folder.join(log_dirpath);
+                let mut process = ProcessWorker::new(threadpool.clone(), log_dirpath);
+                let command = create_transcode_command(&key, &input_filepath, &output_filepath, metadata.as_deref(), &app_config)?;
+                process.label = Some(format!("transcode_{0}", key.as_str()));
+                let stderr_handler = FfmpegStderrHandler::new(worker.clone());
+                process.stderr_handler = Some(Box::new(stderr_handler));
+                if let Err(err) = process.run(command) {
+                    return Err(anyhow::anyhow!("Failed to run process: {err:?}"));
+                }
+                // update logging files
+                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
+                let stdout_filepath = app_config.get_relative_data_path(&process.stdout_filename)?;
+                let stderr_filepath = app_config.get_relative_data_path(&process.stderr_filename)?;
+                database
+                    .connect()?
+                    .select_and_update_ffmpeg_entry(&key, move |entry| {
+                        entry.stdout_log_path = Some(stdout_filepath.to_string_lossy().to_string());
+                        entry.stderr_log_path = Some(stderr_filepath.to_string_lossy().to_string());
+                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
+                        entry.audio_path = Some(relative_output_filepath.to_string_lossy().to_string());
+                    })?;
+                // validate output file exists
+                if !output_filepath.is_file() {
+                    return Err(anyhow::anyhow!("Output file is missing: {0}", output_filepath.to_string_lossy()));
+                }
+                Ok(())
+            }
+        };
+
+        let outer_runner = {
+            let key = key.clone();
+            let worker = worker.clone();
+            let database = self.database.clone();
+            move || -> anyhow::Result<()> {
+                {
+                    database
+                        .connect()?
+                        .select_and_update_ffmpeg_entry(&key, move |entry| {
+                            entry.status = WorkerStatus::Running;
+                        })?;
+                    let mut state = worker.state.lock().unwrap();
+                    state.worker_status = WorkerStatus::Running;
+                    worker.condvar.notify_all();
+                }
+                match inner_runner() {
+                    Err(err) => {
+                        database
+                            .connect()?
+                            .select_and_update_ffmpeg_entry(&key, move |entry| {
+                                entry.status = WorkerStatus::Failed;
+                            })?;
+                        let mut state = worker.state.lock().unwrap();
+                        state.worker_status = WorkerStatus::Failed;
+                        state.fail_reason = Some(err.to_string());
+                        state.end_time_unix = get_unix_time();
+                        worker.condvar.notify_all();
+                    },
+                    Ok(()) => {
+                        database
+                            .connect()?
+                            .select_and_update_ffmpeg_entry(&key, move |entry| {
+                                entry.status = WorkerStatus::Finished;
+                            })?;
+                        let mut state = worker.state.lock().unwrap();
+                        state.worker_status = WorkerStatus::Finished;
+                        worker.condvar.notify_all();
+                    },
+                }
+                Ok(())
+            }
+        };
+        self.threadpool.execute(move || {
+            if let Err(err) = outer_runner() {
+                log::error!("Runner failed with: {0}", err);
+            }
+        });
+        Ok(worker)
     }
-    if audio_path.exists() {
-        Ok(audio_path)
-    } else {
-        Err(TranscodeError::MissingOutputFile(audio_path))
-    }
+}
+
+fn create_transcode_command(
+    key: &TranscodeKey,
+    input_path: &PathBuf,
+    output_path: &PathBuf,
+    metadata: Option<&YoutubeMetadata>,
+    app_config: &AppConfig,
+) -> anyhow::Result<Command> {
+    let ffmpeg_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("ffmpeg.exe"))?;
+    let mut command = Command::new(ffmpeg_binary_path);
+    let args = ffmpeg::create_ffmpeg_transcode_arguments(input_path, output_path, &key.video_id, key.audio_ext, metadata);
+    command.current_dir(&app_config.binaries_folder);
+    command.args(args.as_slice());
+    Ok(command)
 }

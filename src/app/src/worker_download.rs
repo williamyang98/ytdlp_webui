@@ -1,21 +1,17 @@
-use std::cell::RefCell;
-use std::io::{BufReader, BufWriter, BufRead, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use dashmap::DashMap;
-use serde::Serialize;
-use thiserror::Error;
-use crate::app::App;
-use crate::workers::{WorkerCacheEntry, WorkerError};
-use crate::database::{
-    DatabaseError, DatabasePoolError,
-    VideoId, WorkerStatus,
-};
-use crate::util::{get_unix_time, defer, ConvertCarriageReturnToNewLine};
+use crate::app_config::AppConfig;
+use crate::database::{Database, VideoId, WorkerStatus};
+use crate::util::get_unix_time;
+use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
 use crate::ytdlp;
+use anyhow::Context;
+use dashmap::DashMap;
+use derive_more::Debug;
+use serde::Serialize;
+use std::ops::ControlFlow;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::{Arc, Condvar, Mutex};
+use threadpool::ThreadPool;
 
 #[derive(Clone,Debug,Serialize)]
 pub struct DownloadState {
@@ -35,7 +31,7 @@ impl Default for DownloadState {
     fn default() -> Self {
         let curr_time = get_unix_time();
         Self {
-            worker_status: WorkerStatus::None,
+            worker_status: WorkerStatus::Queued,
             file_cached: false,
             fail_reason: None,
             start_time_unix: curr_time,
@@ -56,7 +52,7 @@ fn update_field<T>(dst: &mut Option<T>, src: Option<T>) {
 }
 
 impl DownloadState {
-    pub fn update_from_ytdlp(&mut self, progress: ytdlp::DownloadProgress) {
+    pub fn update_from_ytdlp(&mut self, progress: &ytdlp::DownloadProgress) {
         self.end_time_unix = get_unix_time();
         update_field(&mut self.eta_seconds, progress.eta_seconds);
         update_field(&mut self.elapsed_seconds, progress.elapsed_seconds);
@@ -66,283 +62,309 @@ impl DownloadState {
     }
 }
 
-pub type DownloadCache = Arc<DashMap<VideoId, WorkerCacheEntry<DownloadState>>>;
-
-#[derive(Debug,Error)]
-pub enum DownloadStartError {
-    #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] DatabasePoolError),
-    #[error("Database error: {0:?}")]
-    DatabaseExecute(#[from] DatabaseError),
+pub struct DownloadWorker {
+    video_id: VideoId,
+    state: Mutex<Box<DownloadState>>,
+    condvar: Condvar,
 }
 
-#[derive(Debug,Error)]
-pub enum DownloadError {
-    #[error("Worker error: {0}")]
-    WorkerError(#[from] WorkerError),
-    #[error("Usage error: {0}")]
-    UsageError(String),
-    #[error("Invalid video id")]
-    InvalidVideoId,
-    #[error("ytdlp failed to provide an output path (consider updating ytdlp?)")]
-    MissingOutputPath,
-    #[error("ytdlp download file is missing: {0} (consider updating ytdlp?)")]
-    MissingOutputFile(PathBuf),
-    #[error("Unknown error stored in system log")]
-    LoggedFail,
-    #[error("Database connection failed: {0:?}")]
-    DatabaseConnection(#[from] DatabasePoolError),
-    #[error("Database execute failed: {0:?}")]
-    DatabaseExecute(#[from] DatabaseError),
-}
-
-pub fn try_start_download_worker(video_id: VideoId, app: Arc<App>) -> Result<WorkerStatus, DownloadStartError> {
-    let download_cache = app.download_cache.clone();
-    let app_config = app.app_config.clone();
-    let database = app.database.clone();
-    let worker_thread_pool = app.worker_thread_pool.clone();
-    // check if download in progress (cache hit)
-    {
-        let download_state = download_cache.entry(video_id.clone()).or_default();
-        let mut state = download_state.0.lock().unwrap();
-        match state.worker_status {
-            WorkerStatus::None | WorkerStatus::Failed => {
-                state.worker_status = WorkerStatus::Queued;
-                download_state.1.notify_all();
-            },
-            WorkerStatus::Queued | WorkerStatus::Running | WorkerStatus::Finished => return Ok(state.worker_status),
+impl DownloadWorker {
+    fn new(video_id: VideoId) -> Self {
+        Self {
+            video_id,
+            state: Mutex::new(Box::new(DownloadState::default())),
+            condvar: Condvar::new(),
         }
     }
-    // rollback download cache entry if enqueue failed
-    let is_queue_success = Rc::new(RefCell::new(false));
-    let _revert_download_cache = defer({
-        let is_queue_success = is_queue_success.clone();
-        let video_id = video_id.clone();
-        let download_cache = download_cache.clone();
-        move || {
-            if !*is_queue_success.borrow() {
-                let download_state = download_cache.get(&video_id).unwrap();
-                download_state.0.lock().unwrap().worker_status = WorkerStatus::None;
-                download_state.1.notify_all();
+
+    pub fn get_status(&self) -> WorkerStatus {
+        self.state.lock().unwrap().worker_status
+    }
+
+    pub fn wait_busy(&self) {
+        let mut state = self.state.lock().unwrap();
+        loop {
+            if !state.worker_status.is_busy() {
+                break;
+            }
+            state = self.condvar.wait(state).unwrap();
+        }
+    }
+
+    pub fn get_state(&self) -> Box<DownloadState> {
+        self.state.lock().unwrap().clone()
+    }
+}
+
+#[derive(Clone)]
+struct YtdlpStdoutHandler {
+    worker: Arc<DownloadWorker>,
+    download_path: Arc<Mutex<Option<String>>>,
+}
+
+impl YtdlpStdoutHandler {
+    pub fn new(worker: Arc<DownloadWorker>) -> Self {
+        Self {
+            worker,
+            download_path: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl ProcessPipeHandler for YtdlpStdoutHandler {
+    fn read_line(&self, line: &str) -> ControlFlow<()> {
+        match ytdlp::parse_stdout_line(line) {
+            None => (),
+            Some(ytdlp::ParsedStdoutLine::DownloadProgress(ref progress)) => {
+                log::debug!("[download] id={0} progress={1:?}", self.worker.video_id.as_str(), progress);
+                self.worker.state.lock().unwrap().update_from_ytdlp(progress);
+            },
+            Some(ytdlp::ParsedStdoutLine::OutputPath(path)) => {
+                *self.download_path.lock().unwrap() = Some(path);
+            },
+        }
+        return ControlFlow::Continue(());
+    }
+
+    fn finish(&self) {
+
+    }
+}
+
+#[derive(Clone)]
+struct YtdlpStderrHandler {
+    extract_path: Arc<Mutex<Option<anyhow::Result<String>>>>,
+}
+
+impl Default for YtdlpStderrHandler {
+    fn default() -> Self {
+        Self {
+            extract_path: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl ProcessPipeHandler for YtdlpStderrHandler {
+    fn read_line(&self, line: &str) -> ControlFlow<()> {
+        match ytdlp::parse_stderr_line(line) {
+            None => ControlFlow::Continue(()),
+            Some(ytdlp::ParsedStderrLine::MissingVideo(id)) => {
+                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Missing video id: {id}")));
+                ControlFlow::Break(())
+            },
+            Some(ytdlp::ParsedStderrLine::UsageError(message)) => {
+                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Usage error: {message}")));
+                ControlFlow::Break(())
+            },
+            Some(ytdlp::ParsedStderrLine::ExtractPath(path)) => {
+                *self.extract_path.lock().unwrap() = Some(Ok(path));
+                ControlFlow::Continue(())
+            },
+        }
+    }
+
+    fn finish(&self) {
+
+    }
+}
+
+pub struct DownloadWorkers {
+    database: Arc<Database>,
+    threadpool: Arc<ThreadPool>,
+    app_config: Arc<AppConfig>,
+    cache: DashMap<VideoId, Arc<DownloadWorker>>,
+}
+
+impl DownloadWorkers {
+    pub fn new(database: Arc<Database>, threadpool: Arc<ThreadPool>, app_config: Arc<AppConfig>) -> Self {
+        Self {
+            database,
+            threadpool,
+            app_config,
+            cache: DashMap::new(),
+        }
+    }
+
+    pub fn get_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
+        self.cache.get(video_id).as_deref().cloned()
+    }
+
+    pub fn delete_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
+        self.cache.remove(video_id).map(|(_key, value)| value)
+    }
+
+    pub fn start_worker(&self, video_id: &VideoId) -> anyhow::Result<Arc<DownloadWorker>> {
+        // check cache hit
+        if let Some(worker) = self.cache.get(video_id) {
+            let state = worker.state.lock().unwrap();
+            if state.worker_status.is_healthy() {
+                return Ok(worker.clone());
             }
         }
-    });
-    {
-        let mut db_conn = database.connect()?;
-        // check if download finished on disk (cache miss due to reset)
-        let entry = db_conn.select_ytdlp_entry(&video_id)?;
-        if let Some(entry) = entry {
-            if let Some(audio_path) = entry.audio_path {
-                let status = entry.status;
-                let audio_path = PathBuf::from(audio_path);
-                if status == WorkerStatus::Finished && audio_path.exists() {
-                    let download_state = download_cache.entry(video_id.clone()).or_default();
-                    let mut state = download_state.0.lock().unwrap();
-                    state.worker_status = status;
-                    state.file_cached = true;
-                    download_state.1.notify_all();
-                    *is_queue_success.borrow_mut() = true;
-                    return Ok(status);
+        // new cache item
+        let worker = Arc::new(DownloadWorker::new(video_id.clone()));
+        let _old_worker = self.cache.insert(video_id.clone(), worker.clone());
+        // check database item
+        if let Some(db_entry) = self.database.connect()?.select_ytdlp_entry(&video_id)? {
+            if db_entry.status == WorkerStatus::Finished {
+                if let Some(audio_path) = db_entry.audio_path {
+                    let audio_path = self.app_config.data_folder.join(audio_path);
+                    if audio_path.is_file() {
+                        let mut state = worker.state.lock().unwrap();
+                        state.worker_status = WorkerStatus::Finished;
+                        state.file_cached = true;
+                        state.start_time_unix = db_entry.unix_time.as_u64();
+                        state.end_time_unix = db_entry.unix_time.as_u64();
+                        worker.condvar.notify_all();
+                        drop(state);
+                        return Ok(worker);
+                    } else {
+                        log::warn!("Restarting download because audio file was missing: {0}", audio_path.to_string_lossy());
+                    }
                 }
             }
         }
-        // start download worker
-        let _ = db_conn.insert_ytdlp_entry(&video_id)?;
-    }
-    worker_thread_pool.lock().unwrap().execute(move || {
-        log::info!("Launching download process: {0}", video_id.as_str());
-        // setup logging
-        let system_log_path = app_config.downloads_folder.join(format!("{}.system.log", video_id.as_str()));
-        let system_log_file = match std::fs::File::create(system_log_path.clone()) {
-            Ok(system_log_file) => system_log_file,
-            Err(err) => {
-                log::error!("Failed to create system log file: path={0}, err={1:?}", system_log_path.to_str().unwrap(), err);
-                return;
-            },
-        };
-        if let Ok(mut db_conn) = database.connect() {
+        // new database item
+        {
+            let mut db_conn = self.database.connect()?;
+            db_conn.delete_ytdlp_entry(&video_id)?;
+            db_conn.insert_ytdlp_entry(&video_id)?;
             db_conn.select_and_update_ytdlp_entry(&video_id, |entry| {
-                entry.system_log_path = Some(system_log_path.to_str().unwrap().to_owned());
-            }).unwrap();
+                entry.status = WorkerStatus::Queued;
+                entry.unix_time = get_unix_time().into();
+            })?;
         }
-        let system_log_writer = Arc::new(Mutex::new(BufWriter::new(system_log_file)));
-        // launch process
-        let res = enqueue_download_worker(video_id.clone(), app.clone(), system_log_writer.clone());
-        if let Err(ref err) = res {
-            let _ = writeln!(&mut system_log_writer.lock().unwrap(), "[error] Worker failed with: {err:?}");
-        }
-        // update database
-        let (audio_path, worker_status, worker_error) = match res {
-            Ok(path) => (Some(path), WorkerStatus::Finished, None),
-            Err(err) => (None, WorkerStatus::Failed, Some(err)),
+        let inner_runner = {
+            let video_id = video_id.clone();
+            let database = self.database.clone();
+            let app_config = self.app_config.clone();
+            let threadpool = self.threadpool.clone();
+            let worker = worker.clone();
+            move || -> anyhow::Result<()> {
+                // setup process
+                let log_dirpath = app_config.downloads_folder.join(format!("{0}", video_id.as_str()));
+                let mut process = ProcessWorker::new(threadpool.clone(), log_dirpath);
+                process.label = Some(format!("download_{0}", video_id.as_str()));
+                let command = create_download_command(&video_id, &app_config)?;
+                let stdout_handler = Box::new(YtdlpStdoutHandler::new(worker.clone()));
+                let stderr_handler = Box::new(YtdlpStderrHandler::default());
+                process.stdout_handler = Some(stdout_handler.clone());
+                process.stderr_handler = Some(stderr_handler.clone());
+                if let Err(err) = process.run(command) {
+                    return Err(anyhow::anyhow!("Failed to run process: {err:?}"));
+                }
+                // update logging files
+                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
+                let stdout_filepath = app_config.get_relative_data_path(&process.stdout_filename)?;
+                let stderr_filepath = app_config.get_relative_data_path(&process.stderr_filename)?;
+                database
+                    .connect()?
+                    .select_and_update_ytdlp_entry(&video_id, move |entry| {
+                        entry.stdout_log_path = Some(stdout_filepath.to_string_lossy().to_string());
+                        entry.stderr_log_path = Some(stderr_filepath.to_string_lossy().to_string());
+                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
+                    })?;
+                // NOTE: Audio extractor for yt-dlp might not extract anything if the file extension remains the same
+                let download_filepath: Option<String> = stdout_handler.download_path.lock().unwrap().clone();
+                let extract_filepath: Option<String> = stderr_handler.extract_path.lock().unwrap().as_mut()
+                    .map(|res| res.as_ref().ok().cloned())
+                    .flatten();
+                if let Some(filepath) = &download_filepath {
+                    log::debug!("Got ytdlp download filepath: {0}", filepath);
+                }
+                if let Some(filepath) = &extract_filepath {
+                    log::debug!("Got ytdlp extract filepath: {0}", &filepath);
+                }
+                let output_filepath = extract_filepath.or(download_filepath);
+                let Some(output_filepath) = output_filepath else {
+                    return Err(anyhow::anyhow!("Failed to get output filepath"));
+                };
+                let output_filepath = PathBuf::from(output_filepath);
+                if !output_filepath.is_file() {
+                    return Err(anyhow::anyhow!("Output filepath doesn't exist: {0}", output_filepath.to_string_lossy()));
+                }
+                let relative_output_filepath = match app_config.get_relative_data_path(&output_filepath) {
+                    Ok(path) => path,
+                    Err(err) => {
+                        return Err(anyhow::anyhow!("Failed to get relative output filepath: {0}", err));
+                    },
+                };
+                log::debug!("Got ytdlp relative output filepath: {0}", relative_output_filepath.to_string_lossy());
+                database
+                    .connect()?
+                    .select_and_update_ytdlp_entry(&video_id, move |entry| {
+                        entry.audio_path = Some(relative_output_filepath.to_string_lossy().to_string());
+                    })?;
+                Ok(())
+            }
         };
-        {
-            let mut db_conn = database.connect().unwrap();
-            let _ = db_conn.select_and_update_ytdlp_entry(&video_id, |entry| {
-                entry.audio_path = audio_path.map(|p| p.to_str().unwrap().to_string());
-                entry.status = worker_status;
-            }).unwrap();
-        }
-        // NOTE: update cache so changes to database are visible to signal listeners (transcode threads)
-        let download_state = download_cache.entry(video_id.clone()).or_default();
-        let mut state = download_state.0.lock().unwrap();
-        state.worker_status = worker_status;
-        state.fail_reason = worker_error.map(|e| e.to_string());
-        download_state.1.notify_all();
-    });
-    *is_queue_success.borrow_mut() = true;
-    Ok(WorkerStatus::Queued)
+
+        let outer_runner = {
+            let video_id = video_id.clone();
+            let worker = worker.clone();
+            let database = self.database.clone();
+            move || -> anyhow::Result<()> {
+                {
+                    database
+                        .connect()?
+                        .select_and_update_ytdlp_entry(&video_id, move |entry| {
+                            entry.status = WorkerStatus::Running;
+                        })?;
+                    let mut state = worker.state.lock().unwrap();
+                    state.worker_status = WorkerStatus::Running;
+                    worker.condvar.notify_all();
+                }
+                match inner_runner() {
+                    Err(err) => {
+                        database
+                            .connect()?
+                            .select_and_update_ytdlp_entry(&video_id, move |entry| {
+                                entry.status = WorkerStatus::Failed;
+                            })?;
+                        let mut state = worker.state.lock().unwrap();
+                        state.worker_status = WorkerStatus::Failed;
+                        state.fail_reason = Some(err.to_string());
+                        state.end_time_unix = get_unix_time();
+                        worker.condvar.notify_all();
+                    },
+                    Ok(()) => {
+                        database
+                            .connect()?
+                            .select_and_update_ytdlp_entry(&video_id, move |entry| {
+                                entry.status = WorkerStatus::Finished;
+                            })?;
+                        let mut state = worker.state.lock().unwrap();
+                        state.worker_status = WorkerStatus::Finished;
+                        worker.condvar.notify_all();
+                    },
+                }
+                Ok(())
+            }
+        };
+
+        self.threadpool.execute(move || {
+            if let Err(err) = outer_runner() {
+                log::error!("Runner failed with: {0}", err);
+            }
+        });
+        Ok(worker)
+    }
 }
 
-fn enqueue_download_worker(video_id: VideoId, app: Arc<App>, system_log_writer: Arc<Mutex<impl Write>>) -> Result<PathBuf, DownloadError> {
-    let download_cache = app.download_cache.clone();
-    let app_config = app.app_config.clone();
-    let database = app.database.clone();
-    // logging files
-    let stdout_log_path = app_config.downloads_folder.join(format!("{}.stdout.log", video_id.as_str()));
-    let stderr_log_path = app_config.downloads_folder.join(format!("{}.stderr.log", video_id.as_str()));
-    // spawn process
+fn create_download_command(video_id: &VideoId, app_config: &AppConfig) -> anyhow::Result<Command> {
     let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
-    let ytdlp_binary_path = app_config.binaries_folder.join("yt-dlp.exe");
-    let ffmpeg_binary_path = app_config.binaries_folder.join("ffmpeg.exe");
-    let process_res = Command::new(ytdlp_binary_path)
-        .args(ytdlp::get_ytdlp_arguments(
-            url.as_str(), 
-            ffmpeg_binary_path.to_str().expect("Failed to turn ffmpeg binary path into UTF-8 string"),
-            app_config.downloads_folder.join("%(id)s.%(ext)s").to_str().unwrap(),
-        ))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let mut process = match process_res {
-        Ok(process) => process,
-        Err(err) => {
-            writeln!(&mut system_log_writer.lock().unwrap(), "[error] ytdlp failed to start: {err:?}")
-                .map_err(WorkerError::SystemWriteFail)?;
-            return Err(DownloadError::LoggedFail);
-        }
-    };
-    // update as running
-    {
-        let download_state = download_cache.get(&video_id).unwrap();
-        download_state.0.lock().unwrap().worker_status = WorkerStatus::Running;
-        download_state.1.notify_all();
-    }
-    {
-        let mut db_conn = database.connect()?;
-        let _ = db_conn.select_and_update_ytdlp_entry(&video_id, |entry| entry.status = WorkerStatus::Running)?;
-    }
-    // scrape stdout and stderr
-    let stdout_thread = thread::spawn({
-        let database = database.clone();
-        let video_id = video_id.clone();
-        let stdout_handle = process.stdout.take().ok_or(WorkerError::StdoutMissing)?;
-        let mut stdout_reader = BufReader::new(ConvertCarriageReturnToNewLine::new(stdout_handle));
-        let stdout_log_file = std::fs::File::create(stdout_log_path.clone()).map_err(WorkerError::StdoutLogCreate)?;
-        let mut stdout_log_writer = BufWriter::new(stdout_log_file);
-        {
-            let mut db_conn = database.connect()?;
-            let _ = db_conn.select_and_update_ytdlp_entry(&video_id, |entry| {
-                entry.stdout_log_path = Some(stdout_log_path.to_str().unwrap().to_owned());
-            })?;
-        }
-        move || -> Result<Option<String>, DownloadError> {
-            let mut line = String::new();
-            let mut download_path = None;
-            loop {
-                match stdout_reader.read_line(&mut line) {
-                    Err(_) => break,
-                    Ok(0) => break,
-                    Ok(_) => (),
-                }
-                let _ = stdout_log_writer.write(line.as_bytes()).map_err(WorkerError::StdoutWriteFail)?;
-                match ytdlp::parse_stdout_line(line.as_str()) {
-                    None => (),
-                    Some(ytdlp::ParsedStdoutLine::DownloadProgress(progress)) => {
-                        log::debug!("[download] id={0} progress={progress:?}", video_id.as_str());
-                        let download_state = download_cache.entry(video_id.clone()).or_default();
-                        download_state.0.lock().unwrap().update_from_ytdlp(progress);
-                    },
-                    Some(ytdlp::ParsedStdoutLine::OutputPath(path)) => {
-                        download_path = Some(path);
-                    },
-                }
-                line.clear();
-            }
-            Ok(download_path)
-        }
-    });
-    let stderr_thread = thread::spawn({
-        let database = database.clone();
-        let video_id = video_id.clone();
-        let stderr_handle = process.stderr.take().ok_or(WorkerError::StderrMissing)?;
-        let mut stderr_reader = BufReader::new(ConvertCarriageReturnToNewLine::new(stderr_handle));
-        let stderr_log_file = std::fs::File::create(stderr_log_path.clone()).map_err(WorkerError::StderrLogCreate)?;
-        let mut stderr_log_writer = BufWriter::new(stderr_log_file);
-        {
-            let mut db_conn = database.connect()?;
-            let _ = db_conn.select_and_update_ytdlp_entry(&video_id, |entry| {
-                entry.stderr_log_path = Some(stderr_log_path.to_str().unwrap().to_owned());
-            })?;
-        }
-        move || {
-            let mut line = String::new();
-            let mut extract_path = None;
-            loop {
-                match stderr_reader.read_line(&mut line) {
-                    Err(_) => break,
-                    Ok(0) => break,
-                    Ok(_) => (),
-                }
-                let _ = stderr_log_writer.write(line.as_bytes()).map_err(WorkerError::StderrWriteFail)?;
-                match ytdlp::parse_stderr_line(line.as_str()) {
-                    None => (),
-                    Some(ytdlp::ParsedStderrLine::MissingVideo(_)) => return Err(DownloadError::InvalidVideoId),
-                    Some(ytdlp::ParsedStderrLine::UsageError(message)) => return Err(DownloadError::UsageError(message)),
-                    Some(ytdlp::ParsedStderrLine::ExtractPath(path)) => {
-                        extract_path = Some(path);
-                    },
-                }
-                line.clear();
-            }
-            Ok(extract_path)
-        }
-    });
-    // shutdown threads
-    let download_path = stdout_thread.join().map_err(WorkerError::StdoutThreadJoin)??;
-    let extract_path = stderr_thread.join().map_err(WorkerError::StderrThreadJoin)??;
-    // shutdown process
-    match process.try_wait() {
-        Ok(None) => {},
-        Ok(Some(exit_status)) => match exit_status.code() {
-            None => {},
-            Some(0) => {},
-            Some(code) => {
-                writeln!(&mut system_log_writer.lock().unwrap(), "[error] ytdlp failed with bad code: {code:?}")
-                    .map_err(WorkerError::SystemWriteFail)?;
-                return Err(DownloadError::LoggedFail);
-            },
-        },
-        Err(err) => {
-            writeln!(&mut system_log_writer.lock().unwrap(), "[warn] ytdlp process failed to join: {err:?}")
-                .map_err(WorkerError::SystemWriteFail)?;
-            if let Err(err) = process.kill() {
-                writeln!(&mut system_log_writer.lock().unwrap(), "[warn] ytdlp process failed to be killed: {err:?}")
-                    .map_err(WorkerError::SystemWriteFail)?;
-            }
-        },
-    }
-    // NOTE: Audio extractor for yt-dlp might not extract anything if the file extension remains the same
-    let audio_path = extract_path.or(download_path);
-    let Some(audio_path) = audio_path else {
-        return Err(DownloadError::MissingOutputPath)
-    };
-    // download path is relative to current working directory of process
-    let audio_path = app_config.current_working_directory.join(audio_path);
-    if audio_path.exists() {
-        Ok(audio_path)
-    } else {
-        Err(DownloadError::MissingOutputFile(audio_path))
-    }
+    let ytdlp_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("yt-dlp.exe"))?;
+    let ffmpeg_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("ffmpeg.exe"))?;
+    // Can't canonicalize since path doesn't exist yet
+    let output_filepath = app_config.downloads_folder.join("%(id)s.%(ext)s");
+    let output_filepath = std::path::absolute(&output_filepath)
+        .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
+    let mut command = Command::new(ytdlp_binary_path);
+    command.current_dir(&app_config.binaries_folder);
+    command.args(ytdlp::get_ytdlp_arguments(
+        url.as_str(),
+        ffmpeg_binary_path.to_str().expect("Failed to turn ffmpeg binary path into UTF-8 string"),
+        output_filepath.to_str().expect("Failed to turn output filepath into UTF-8 string"),
+    ));
+    Ok(command)
 }

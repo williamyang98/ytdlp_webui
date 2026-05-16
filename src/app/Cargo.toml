@@ -7,10 +7,12 @@ edition = "2021"
 anyhow = { workspace = true }
 bytemuck = { workspace = true }
 dashmap = { workspace = true }
-diesel = { version = "2.3.9", features = ["sqlite", "r2d2"] }
-diesel_migrations = { version = "2.3.2" }
+derive_more = { workspace = true }
+diesel = { workspace = true }
+diesel_migrations = { workspace = true }
+dyn-clone = { workspace = true }
 lazy_static = { workspace = true }
-libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+libsqlite3-sys = { workspace = true }
 log = { workspace = true }
 num = { workspace = true }
 num-derive = { workspace = true }
