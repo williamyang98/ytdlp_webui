@@ -1,5 +1,5 @@
 use anyhow::Context;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 
 #[derive(Clone,Debug)]
@@ -10,12 +10,16 @@ pub struct AppConfig {
     pub downloads_folder: PathBuf,
     pub transcodes_folder: PathBuf,
     pub binaries_folder: PathBuf,
+    pub metadata_folder: PathBuf,
     pub database_path: PathBuf,
     pub total_transcode_threads: usize,
 }
 
 impl AppConfig {
-    pub fn new(data_folder: &Path, static_folder: &Path) -> anyhow::Result<Self> {
+    pub fn new(data_folder: &PathBuf, static_folder: &PathBuf) -> anyhow::Result<Self> {
+        let data_folder = data_folder.to_path_buf();
+        let static_folder = static_folder.to_path_buf();
+
         let get_absolute_dirpath = |dirpath: PathBuf| -> anyhow::Result<PathBuf> {
             std::path::absolute(&dirpath)
                 .with_context(|| format!("Failed to get absolute dirpath from: {0}", dirpath.to_string_lossy()))
@@ -26,14 +30,21 @@ impl AppConfig {
         let downloads_folder = data_folder.join("downloads");
         let transcodes_folder = data_folder.join("transcodes");
         let binaries_folder = data_folder.join("binaries");
+        let metadata_folder = data_folder.join("metadata");
         let database_path = data_folder.join("index.db");
         let current_working_directory = std::env::current_dir()
             .context("Couldn't get current working directory of process")?;
 
-        std::fs::create_dir_all(&data_folder).context("Couldn't create data folder")?;
-        std::fs::create_dir_all(&downloads_folder).context("Couldn't create downloads folder")?;
-        std::fs::create_dir_all(&transcodes_folder).context("Couldn't create transcodes folder")?;
-        std::fs::create_dir_all(&binaries_folder).context("Couldn't create binaries folder")?;
+        let create_folder = |folder: &PathBuf| -> anyhow::Result<()> {
+            std::fs::create_dir_all(folder)
+                .with_context(|| format!("Couldn't create folder: {0}", folder.to_string_lossy()))
+        };
+
+        create_folder(&data_folder)?;
+        create_folder(&downloads_folder)?;
+        create_folder(&transcodes_folder)?;
+        create_folder(&binaries_folder)?;
+        create_folder(&metadata_folder)?;
 
         if !static_folder.exists() {
             return Err(anyhow::anyhow!("Static dirpath doesn't exist: {0}", static_folder.to_string_lossy()));
@@ -47,11 +58,12 @@ impl AppConfig {
 
         Ok(Self {
             current_working_directory,
-            data_folder: data_folder.to_path_buf(),
-            static_folder: static_folder.to_path_buf(),
+            data_folder,
+            static_folder,
             downloads_folder,
             transcodes_folder,
             binaries_folder,
+            metadata_folder,
             database_path,
             total_transcode_threads: 8,
         })

@@ -242,7 +242,7 @@ impl DownloadWorkers {
             let worker = worker.clone();
             move || -> anyhow::Result<()> {
                 // setup process
-                let log_dirpath = app_config.downloads_folder.join(video_id.as_str().to_string());
+                let log_dirpath = app_config.downloads_folder.join(video_id.as_str());
                 let mut process = ProcessWorker::new(threadpool.clone(), log_dirpath);
                 process.label = Some(format!("download_{0}", video_id.as_str()));
                 let command = create_download_command(&video_id, &app_config)?;

@@ -5,9 +5,11 @@ use crate::worker_download::{DownloadWorker, DownloadWorkers};
 use crate::worker_transcode::{TranscodeWorker, TranscodeWorkers};
 use crate::youtube_metadata::{YoutubeMetadata, YoutubeMetadataCache, get_youtube_metadata};
 use dashmap::DashMap;
-use std::{path::PathBuf, sync::Arc};
-use threadpool::ThreadPool;
 use serde::Serialize;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Arc;
+use threadpool::ThreadPool;
 
 #[derive(Clone)]
 pub struct App {
@@ -60,7 +62,48 @@ impl App {
         if let Some(metadata) = self.metadata_cache.get(video_id) {
             return Ok(metadata.clone());
         }
-        let metadata = get_youtube_metadata(video_id).await?;
+
+        // load from filepath
+        let filepath = self.app_config.metadata_folder.join(format!("{0}.json", video_id.as_str()));
+        let load_from_filepath = |path: &PathBuf| -> anyhow::Result<Option<YoutubeMetadata>> {
+            if !path.exists() {
+                log::debug!("Metadata cache miss from disk: {0}", path.to_string_lossy());
+                return Ok(None);
+            }
+            let data = std::fs::read_to_string(path)?;
+            let metadata: YoutubeMetadata = serde_json::from_str(data.as_str())?;
+            Ok(Some(metadata))
+        };
+        let metadata: Option<YoutubeMetadata> = match load_from_filepath(&filepath) {
+            Ok(metadata) => {
+                log::debug!("Metadata cache hit from disk: {0}", filepath.to_string_lossy());
+                metadata
+            },
+            Err(err) => {
+                log::error!("Failed to parse cached metadata on disk at {0}: {1:?}", filepath.to_string_lossy(), err);
+                None
+            },
+        };
+
+        let write_to_filepath = |path: &PathBuf, metadata: &YoutubeMetadata| -> anyhow::Result<()> {
+            let mut file = std::fs::File::create(path)?;
+            let data = serde_json::to_string(metadata)?;
+            file.write_all(data.as_bytes())?;
+            Ok(())
+        };
+
+        let metadata = match metadata {
+            Some(metadata) => metadata,
+            None => {
+                let metadata = get_youtube_metadata(video_id).await?;
+                if let Err(err) = write_to_filepath(&filepath, &metadata) {
+                    log::error!("Failed to cache metadata to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
+                } else {
+                    log::debug!("Cached metadata to disk at {0}", filepath.to_string_lossy());
+                }
+                metadata
+            },
+        };
         let metadata = Arc::new(metadata);
         self.metadata_cache.insert(video_id.clone(), metadata.clone());
         Ok(metadata)
