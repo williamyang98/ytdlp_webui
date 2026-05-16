@@ -196,12 +196,6 @@ impl TranscodeWorkers {
     }
 
     pub fn start_worker(&self, key: &TranscodeKey, metadata: Option<Arc<YoutubeMetadata>>) -> anyhow::Result<Arc<TranscodeWorker>> {
-        let download_worker = self.download_workers.start_worker(&key.video_id)
-            .context(format!("Failed to get download worker while starting transcode worker: {0}", key.as_str()))?;
-        download_worker.wait_busy();
-        if download_worker.get_status() != WorkerStatus::Finished {
-            return Err(anyhow::anyhow!("Transcode worker failed because download worker failed: {0}", key.as_str()));
-        }
         // check cache hit
         if let Some(worker) = self.cache.get(key) {
             let state = worker.state.lock().unwrap();
@@ -247,9 +241,16 @@ impl TranscodeWorkers {
             let database = self.database.clone();
             let app_config = self.app_config.clone();
             let threadpool = self.threadpool.clone();
+            let download_workers = self.download_workers.clone();
             let worker = worker.clone();
             let metadata = metadata.clone();
             move || -> anyhow::Result<()> {
+                let download_worker = download_workers.start_worker(&key.video_id)
+                    .context(format!("Failed to start download worker while starting transcode worker: {0}", key.as_str()))?;
+                download_worker.wait_busy();
+                if download_worker.get_status() != WorkerStatus::Finished {
+                    return Err(anyhow::anyhow!("Transcode worker failed because download worker failed: {0}", key.as_str()));
+                }
                 // determine audio path
                 let input_filepath: PathBuf = {
                     let entry = database
