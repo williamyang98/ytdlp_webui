@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
     app_config.total_transcode_threads = total_transcode_threads;
-    let app = App::new(app_config)?;
+    let app = App::new(app_config.clone())?;
     let app = Arc::new(app);
     // start server
     const API_PREFIX: &str = "/api/v1";
@@ -75,8 +75,8 @@ async fn main() -> anyhow::Result<()> {
                 .service(routes::get_download_link)
                 .service(routes::get_metadata)
             )
-            .service(actix_files::Files::new("/data", "./data/").show_files_listing())
-            .service(actix_files::Files::new("/", "./static/").index_file("index.html"))
+            .service(actix_files::Files::new("/data", &app_config.data_folder).show_files_listing())
+            .service(actix_files::Files::new("/", &app_config.static_folder).index_file("index.html"))
             // NOTE: There is little benefit to using compress middleware when serving audio files
             // since they are already extremely compressed. Additionally it also ends up removing
             // the Content-Length header from the downloads since the file is being streamed.

@@ -29,7 +29,7 @@
       >
         <td v-for="column in columns">
           <template v-if="column.type == ColumnType.LINK">
-            <a v-if="row[1][column.name] !== null" :href="row[1][column.name]">Link</a>
+            <a v-if="row[1][column.name] !== null" :href="`data/${row[1][column.name]}`">Link</a>
           </template>
           <div v-else>{{ column.transform(row[1][column.name]) }}</div>
         </td>
