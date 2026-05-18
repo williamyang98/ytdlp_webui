@@ -1,33 +1,24 @@
 <script setup lang="ts">
-import { type VideoId, type YtdlpRow } from "../api/ytdlp_api_schema.ts";
-import SortIcon from "../utility/SortIcon.vue";
+import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
+import SortIcon from "./SortIcon.vue";
 import { FileMusic, FileTerminal, Trash2 } from 'lucide-vue-next';
 import { format_date } from "../utility/format.ts";
 import { get_data_url } from "../api/api.ts";
 import { ref, computed } from "vue";
+import { providers } from "../providers/providers.ts";
 
-const props = defineProps<{
-  items: YtdlpRow[],
-  selected?: VideoId,
-}>();
+const app = providers.app;
 
-const emits = defineEmits<{
-  select: [VideoId],
-  delete: [VideoId],
-}>();
-
-function select_transcode(row: YtdlpRow) {
-  emits("select", row.video_id);
+function select_download(row: YtdlpRow) {
+  app.select_download(row.video_id);
 }
 
-function delete_transcode(row: YtdlpRow) {
-  emits("delete", row.video_id);
+async function delete_download(row: YtdlpRow) {
+  await app.delete_download(row.video_id);
 }
 
 function get_selected_class(row: YtdlpRow): string {
-  if (props.selected === undefined) return "";
-  const is_selected = row.video_id === props.selected;
-  return is_selected ? "bg-base-300" : "";
+  return row.video_id === app.selected_download_key ? "bg-base-300" : "";
 }
 
 type Column = "video_id" | "status" | "time";
@@ -62,7 +53,7 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
 const sorted_items = computed(() => {
   const column = sort_order.value.column;
   const is_descending = sort_order.value.is_descending;
-  const items = [...props.items];
+  const items = [...app.downloads];
   switch (column) {
     case "video_id": {
       items.sort((a, b) => a.video_id.localeCompare(b.video_id));
@@ -125,7 +116,7 @@ const sorted_items = computed(() => {
       <tr
         class="hover:bg-base-300 cursor-pointer"
         :class="get_selected_class(item)"
-        @click="select_transcode(item)"
+        @click="select_download(item)"
       >
         <th>{{ item.video_id }}</th>
         <td>{{ item.status }}</td>
@@ -151,7 +142,7 @@ const sorted_items = computed(() => {
           </a>
         </td>
         <td>
-          <button class="btn btn-error btn-sm px-1" @click="delete_transcode(item)">
+          <button class="btn btn-error btn-sm px-1" @click="delete_download(item)">
             <Trash2 class="size-5"/>
           </button>
         </td>

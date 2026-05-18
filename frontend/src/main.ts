@@ -1,6 +1,6 @@
 import './main.css'
 import { createApp } from 'vue'
-import App from './App.vue'
+import MainView from './MainView.vue'
 
-const app = createApp(App)
+const app = createApp(MainView)
 app.mount('#app')

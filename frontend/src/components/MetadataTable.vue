@@ -1,17 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { type Metadata } from "../api/youtube_api_schema.ts";
-import { type VideoId } from "../api/ytdlp_api_schema.ts";
 import { get_youtube_link } from "../api/api.ts";
 import { convert_dhms_to_string } from "../utility/format.ts";
+import { providers } from "../providers/providers.ts";
 
-const props = defineProps<{
-  metadata: Metadata,
-  video_id: VideoId,
-}>();
+const app = providers.app;
 
 const item = computed(() => {
-  const item = props.metadata.items.at(0);
+  if (app.metadata === null) return null;
+  const item = app.metadata.items.at(0);
   if (item === undefined) return null;
   return item;
 });
@@ -34,7 +31,8 @@ const thumbnail_link = computed(() => {
 });
 
 const youtube_link = computed(() => {
-  return get_youtube_link(props.video_id);
+  if (item.value === null) return null;
+  return get_youtube_link(item.value.id);
 });
 </script>
 
@@ -63,7 +61,11 @@ const youtube_link = computed(() => {
     </tr>
     <tr>
       <td class="font-medium text-nowrap">Description</td>
-      <td>{{ item.snippet.description }}</td>
+      <td>
+        <div class="w-full max-h-50 overflow-auto">
+          {{ item.snippet.description }}
+        </div>
+      </td>
     </tr>
   </tbody>
 </table>

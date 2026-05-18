@@ -4,6 +4,7 @@ import {
 } from "./youtube_api_schema.ts";
 import {
   type VideoId,
+  type DownloadKey,
   type TranscodeKey,
   type AudioExtension,
   type DownloadState,
@@ -29,70 +30,70 @@ const API_URL = "api/v1";
 export async function request_transcode(key: TranscodeKey): Promise<RequestTranscodeResponse> {
   const response = await fetch(`${BASE_URL}/${API_URL}/request_transcode/${key.video_id}/${key.audio_ext}`);
   const json = await response.json();
-  const state =  RequestTranscodeResponseSchema.parse(json);
+  const state = RequestTranscodeResponseSchema.parse(json);
   return state;
 }
 
-export async function delete_download(video_id: VideoId): Promise<DeleteResponse> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/delete_download/${video_id}`);
+export async function delete_download(key: DownloadKey): Promise<DeleteResponse> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/delete_download/${key}`);
   const json = await response.json();
-  const state =  DeleteResponseSchema.parse(json);
+  const state = DeleteResponseSchema.parse(json);
   return state;
 }
 
 export async function delete_transcode(key: TranscodeKey): Promise<DeleteResponse> {
   const response = await fetch(`${BASE_URL}/${API_URL}/delete_transcode/${key.video_id}/${key.audio_ext}`);
   const json = await response.json();
-  const state =  DeleteResponseSchema.parse(json);
+  const state = DeleteResponseSchema.parse(json);
   return state;
 }
 
 export async function get_downloads(): Promise<YtdlpRow[]> {
   const response = await fetch(`${BASE_URL}/${API_URL}/get_downloads`);
   const json = await response.json();
-  const state =  YtdlpRowSchema.array().parse(json);
+  const state = YtdlpRowSchema.array().parse(json);
   return state;
 }
 
 export async function get_transcodes(): Promise<FfmpegRow[]> {
   const response = await fetch(`${BASE_URL}/${API_URL}/get_transcodes`);
   const json = await response.json();
-  const state =  FfmpegRowSchema.array().parse(json);
+  const state = FfmpegRowSchema.array().parse(json);
   return state;
 }
 
-export async function get_download(video_id: VideoId): Promise<YtdlpRow> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/get_download/${video_id}`);
+export async function get_download(key: DownloadKey): Promise<YtdlpRow> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/get_download/${key}`);
   const json = await response.json();
-  const state =  YtdlpRowSchema.parse(json);
+  const state = YtdlpRowSchema.parse(json);
   return state;
 }
 
 export async function get_transcode(key: TranscodeKey): Promise<FfmpegRow> {
   const response = await fetch(`${BASE_URL}/${API_URL}/get_transcode/${key.video_id}/${key.audio_ext}`);
   const json = await response.json();
-  const state =  FfmpegRowSchema.parse(json);
+  const state = FfmpegRowSchema.parse(json);
   return state;
 }
 
-export async function get_download_state(video_id: VideoId): Promise<DownloadState> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/get_download_state/${video_id}`);
+export async function get_download_state(key: DownloadKey): Promise<DownloadState> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/get_download_state/${key}`);
   const json = await response.json();
-  const state =  DownloadStateSchema.parse(json);
+  const state = DownloadStateSchema.parse(json);
   return state;
 }
 
 export async function get_transcode_state(key: TranscodeKey): Promise<TranscodeState> {
   const response = await fetch(`${BASE_URL}/${API_URL}/get_transcode_state/${key.video_id}/${key.audio_ext}`);
   const json = await response.json();
-  const state =  TranscodeStateSchema.parse(json);
+  const state = TranscodeStateSchema.parse(json);
   return state;
 }
 
-export async function get_metadata(video_id: VideoId): Promise<YoutubeMetadata> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/get_metadata/${video_id}`);
+export async function get_metadata(key: DownloadKey): Promise<YoutubeMetadata> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/get_metadata/${key}`);
   const json = await response.json();
-  const state =  YoutubeMetadataSchema.parse(json);
+  const state = YoutubeMetadataSchema.parse(json);
   return state;
 }
 

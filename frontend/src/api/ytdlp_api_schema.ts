@@ -12,42 +12,47 @@ function convert_video_id(id: string): VideoId {
   return id;
 }
 
+function into_option<T>(value: T | undefined | null): T | undefined {
+  if (value === null || value === undefined) return undefined;
+  return value;
+}
+
 export const DownloadStateSchema = z.object({
   worker_status: WorkerStatusSchema,
   file_cached: z.boolean(),
-  fail_reason: z.string().optional(),
+  fail_reason: z.string().nullish().transform(into_option),
   start_time_unix: z.int().transform(convert_unix_time),
   end_time_unix: z.int().transform(convert_unix_time),
-  eta_seconds: z.int().optional(),
-  elapsed_seconds: z.int().optional(),
-  downloaded_bytes: z.int().optional(),
-  total_bytes: z.int().optional(),
-  speed_bytes: z.int().optional(),
+  eta_seconds: z.int().nullish().transform(into_option),
+  elapsed_seconds: z.int().nullish().transform(into_option),
+  downloaded_bytes: z.int().nullish().transform(into_option),
+  total_bytes: z.int().nullish().transform(into_option),
+  speed_bytes: z.int().nullish().transform(into_option),
 });
 
 export const TranscodeStateSchema = z.object({
   worker_status: WorkerStatusSchema,
   file_cached: z.boolean(),
-  fail_reason: z.string().optional(),
+  fail_reason: z.string().nullish().transform(into_option),
   start_time_unix: z.int().transform(convert_unix_time),
   end_time_unix: z.int().transform(convert_unix_time),
-  source_duration_milliseconds: z.int().optional(),
-  source_start_time_milliseconds: z.int().optional(),
-  source_speed_bits: z.int().optional(),
-  transcode_duration_milliseconds: z.int().optional(),
-  transcode_size_bytes: z.int().optional(),
-  transcode_speed_bits: z.int().optional(),
-  transcode_speed_factor: z.float32().optional(),
+  source_duration_milliseconds: z.int().nullish().transform(into_option),
+  source_start_time_milliseconds: z.int().nullish().transform(into_option),
+  source_speed_bits: z.int().nullish().transform(into_option),
+  transcode_duration_milliseconds: z.int().nullish().transform(into_option),
+  transcode_size_bytes: z.int().nullish().transform(into_option),
+  transcode_speed_bits: z.int().nullish().transform(into_option),
+  transcode_speed_factor: z.float32().nullish().transform(into_option),
 });
 
 export const YtdlpRowSchema = z.object({
   video_id: z.string().transform(convert_video_id),
   status: WorkerStatusSchema,
   unix_time: z.int().transform(convert_unix_time),
-  stdout_log_path: z.string().optional(),
-  stderr_log_path: z.string().optional(),
-  system_log_path: z.string().optional(),
-  audio_path: z.string().optional(),
+  stdout_log_path: z.string().nullish().transform(into_option),
+  stderr_log_path: z.string().nullish().transform(into_option),
+  system_log_path: z.string().nullish().transform(into_option),
+  audio_path: z.string().nullish().transform(into_option),
 });
 
 export const FfmpegRowSchema = z.object({
@@ -55,10 +60,10 @@ export const FfmpegRowSchema = z.object({
   audio_ext: AudioExtensionSchema,
   status: WorkerStatusSchema,
   unix_time: z.int().transform(convert_unix_time),
-  stdout_log_path: z.string().optional(),
-  stderr_log_path: z.string().optional(),
-  system_log_path: z.string().optional(),
-  audio_path: z.string().optional(),
+  stdout_log_path: z.string().nullish().transform(into_option),
+  stderr_log_path: z.string().nullish().transform(into_option),
+  system_log_path: z.string().nullish().transform(into_option),
+  audio_path: z.string().nullish().transform(into_option),
 });
 
 export const DeleteFileResultSchema = z.discriminatedUnion("type", [
@@ -87,7 +92,17 @@ export type DeleteFileResult = z.infer<typeof DeleteFileResultSchema>;
 export type DeleteResponse = z.infer<typeof DeleteResponseSchema>;
 export type RequestTranscodeResponse = z.infer<typeof RequestTranscodeResponseSchema>;
 export type VideoId = string;
+export type DownloadKey = VideoId;
 export interface TranscodeKey {
   video_id: VideoId;
   audio_ext: AudioExtension;
+}
+
+export function is_worker_running(status: WorkerStatus) {
+  switch (status) {
+    case "queued": return true;
+    case "running": return true;
+    case "failed": return false;
+    case "finished": return false;
+  }
 }

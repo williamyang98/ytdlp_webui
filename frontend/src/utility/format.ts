@@ -109,3 +109,13 @@ export function sanitise_to_filepath(x: string): string {
     .replace(WIN32_RESERVED_REGEX, '')
     .replace(WIN32_TRAILING_REGEX, '');
 }
+
+const VIDEO_ID_REGEX = /(?:^.*(?:(?:youtu.be\/)|(?:v\/)|(?:\/u\/\w\/)|(?:embed\/)|(?:watch\?))\??v?=?)?([^#&?]*).*/;
+const VIDEO_ID_LENGTH = 11;
+export function extract_youtube_video_id(url: string): string | null {
+  const match = url.match(VIDEO_ID_REGEX);
+  if (!match) { return null; }
+  const id = match[1];
+  if (id.length !== VIDEO_ID_LENGTH) { return null; }
+  return id;
+}

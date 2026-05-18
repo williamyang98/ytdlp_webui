@@ -1,40 +1,34 @@
 <script setup lang="ts">
 import { type TranscodeKey, type FfmpegRow } from "../api/ytdlp_api_schema.ts";
-import SortIcon from "../utility/SortIcon.vue";
+import SortIcon from "./SortIcon.vue";
 import { FileMusic, FileTerminal, Trash2 } from 'lucide-vue-next';
 import { format_date } from "../utility/format.ts";
 import { get_data_url } from "../api/api.ts";
 import { ref, computed } from "vue";
+import { providers } from "../providers/providers.ts";
 
-const props = defineProps<{
-  items: FfmpegRow[],
-  selected?: TranscodeKey,
-}>();
-
-const emits = defineEmits<{
-  select: [TranscodeKey],
-  delete: [TranscodeKey],
-}>();
+const app = providers.app;
 
 function select_transcode(row: FfmpegRow) {
   const key: TranscodeKey = {
     video_id: row.video_id,
     audio_ext: row.audio_ext,
   };
-  emits("select", key);
+  app.select_transcode(key);
 }
 
-function delete_transcode(row: FfmpegRow) {
+async function delete_transcode(row: FfmpegRow) {
   const key: TranscodeKey = {
     video_id: row.video_id,
     audio_ext: row.audio_ext,
   };
-  emits("delete", key);
+  await app.delete_transcode(key);
 }
 
 function get_selected_class(row: FfmpegRow): string {
-  if (props.selected === undefined) return "";
-  const is_selected = row.video_id === props.selected.video_id && row.audio_ext === props.selected.audio_ext;
+  const key = app.selected_transcode_key;
+  if (key === null) return "";
+  const is_selected = row.video_id === key.video_id && row.audio_ext === key.audio_ext;
   return is_selected ? "bg-base-300" : "";
 }
 
@@ -70,7 +64,7 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
 const sorted_items = computed(() => {
   const column = sort_order.value.column;
   const is_descending = sort_order.value.is_descending;
-  const items = [...props.items];
+  const items = [...app.transcodes];
   switch (column) {
     case "video_id": {
       items.sort((a, b) => a.video_id.localeCompare(b.video_id));
