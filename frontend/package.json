@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
-    "build-only": "vite build",
+    "build": "vite build",
+    "lint": "run-p eslint type-check",
     "type-check": "vue-tsc --build",
-    "lint": "eslint . --fix"
+    "eslint": "eslint . --fix"
   },
   "dependencies": {
     "@vueuse/core": "^13.1.0",
