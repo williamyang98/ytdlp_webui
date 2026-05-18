@@ -36,11 +36,26 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Strict Lint
+    - name: npm install packages
+      shell: bash
+      working-directory: ./frontend
+      run: npm install
+
+    - name: npm lint
+      shell: bash
+      working-directory: ./frontend
+      run: npm run lint
+
+    - name: npm build
+      shell: bash
+      working-directory: ./frontend
+      run: npm run build-only
+
+    - name: rust lint
       shell: bash
       run: cargo clippy --profile ${{env.BUILD_TYPE}} -- -D warnings
 
-    - name: Build
+    - name: rust build
       shell: bash
       run: cargo build --profile ${{env.BUILD_TYPE}}
 
