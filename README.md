@@ -21,7 +21,7 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 2. Enter the ```frontend``` directory
 3. Install npm packages: ```npm install```
 4. Serve website in development mode: ```npm run dev```
-5. Build website to ```dist``` folder: ```npm run build```
+5. Build website to ```static``` folder in top level directory: ```npm run build```
 ### Building server
 1. Download and install rust from [https://rust-lang.org/tools/install/](https://rust-lang.org/tools/install/)
 2. Enter the root directory

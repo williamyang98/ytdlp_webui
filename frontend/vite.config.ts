@@ -15,5 +15,9 @@ export default defineConfig(({ mode }) => {
       svgLoader(),
     ],
     base: env.VITE_BASE_URL,
+    build: {
+      outDir: "../static",
+      emptyOutDir: true,
+    },
   }
 })
