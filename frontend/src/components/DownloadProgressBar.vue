@@ -13,7 +13,7 @@ const width = computed((): number => {
   switch (state.worker_status) {
     case "finished": return 1;
     case "failed": return 1;
-    case "queued": return 0;
+    case "queued": return 1;
     case "running": break;
   }
   let total_bytes = state.total_bytes;
@@ -31,10 +31,10 @@ const colour = computed((): string => {
   const state = props.state;
   if (state === null) return "Pending";
   switch (state.worker_status) {
-    case "finished": return "bg-green-400";
-    case "failed": return "bg-red-400";
-    case "queued": return "bg-orange-400";
-    case "running": return "bg-blue-400";
+    case "finished": return "bg-success";
+    case "failed": return "bg-error";
+    case "queued": return "bg-warning";
+    case "running": return "bg-info";
     default: return "";
   }
 });
@@ -90,6 +90,8 @@ const subtitle = computed((): string | null => {
   const text = `${text_size_progress} ${text_prediction}`
   return text;
 });
+
+const subtitle_colour = computed(() => props.state?.worker_status === "failed" ? "text-error-content" : "");
 </script>
 
 <template>
@@ -103,7 +105,7 @@ const subtitle = computed((): string | null => {
       <span class="align-middle px-2 font-medium">{{ status }}</span>
     </div>
   </div>
-  <p v-if="subtitle !== null" class="label">{{ subtitle }}</p>
+  <p v-if="subtitle !== null" class="label pl-1" :class="subtitle_colour">{{ subtitle }}</p>
 </div>
 </template>
 
