@@ -16,12 +16,15 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 ![Screenshot](./docs/screenshot_webpage.png)
 
 ## Building from source
-1. Download rust
-2. Download packages using ```./scripts/download_*.sh``` for your platform if required
+1. Download and install rust from [https://rust-lang.org/tools/install/](https://rust-lang.org/tools/install/)
 3. Build programs: ```cargo build -r```
 4. Download binaries: ```cargo run -r --bin cli```
-5. Copy environment file ```./scripts/.env_*``` for your platform and rename it to ```.env``` in the root folder
+5. Download packages using ```./scripts/download_*.sh``` for your platform if required
+6. Copy environment file ```./scripts/.env_*``` for your platform and rename it to ```.env``` in the root folder
+7. Download binaries: ```cargo run -r --bin cli```
+8. Run server: ```cargo run -r --bin server```
 
-## Running server
-- Run server: ```cargo run -r --bin server```
-- Update binaries: ```cargo run -r --bin cli```
+## Getting Youtube data api v3 key
+- You may have to provide your own Youtube data api v3 key if the provided public key is overused or invalidated
+- Follow the instructions here to get your own api key [https://developers.google.com/youtube/v3/getting-started](https://developers.google.com/youtube/v3/getting-started)
+- Then place it inside your ```.env``` file in the root folder as ```YOUTUBE_API_KEY=INSERT_YOUR_YOUTUBE_API_KEY_HERE``` 
