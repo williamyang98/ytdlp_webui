@@ -30,7 +30,11 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 5. Download packages using ```./scripts/download_*.sh``` for your platform if required
 6. Copy environment file ```./scripts/.env_*``` for your platform and rename it to ```.env``` in the root folder
 7. Download binaries: ```cargo run -r --bin cli```
-8. Run server: ```cargo run -r --bin server```
+8. Run server: ```cargo run -r --bin server -- --enable-cors```
+### Note about cross origin resource sharing (CORS)
+- Passing the argument ```--enable-cors``` when running the server enables cross origin resource sharing
+- This allows for the frontend development server for the website to connect to the backend server
+- You can avoid passing this flag when accessing the website from the backend server
 
 ## Getting a Youtube data api v3 key
 - You may have to provide your own Youtube data api v3 key if the provided public key is overused or invalidated
