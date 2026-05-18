@@ -60,7 +60,7 @@ watch(video_id, (video_id) => {
     </label>
     <label v-if="error_message" class="text-sm text-error text-bold p-1 text-nowrap">{{ error_message }}</label>
   </div>
-  <select class="select flex-none w-23 rounded-none" v-model="audio_ext">
+  <select class="select flex-none w-20 rounded-none" v-model="audio_ext">
     <option value="mp3">mp3</option>
     <option value="m4a">m4a</option>
     <option value="webm">webm</option>
