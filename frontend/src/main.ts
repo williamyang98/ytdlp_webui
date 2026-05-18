@@ -1,6 +1,16 @@
 import './main.css'
 import { createApp } from 'vue'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import MainView from './MainView.vue'
+import { routes } from "./routes/routes.ts";
 
-const app = createApp(MainView)
-app.mount('#app')
+const router = createRouter({
+  history: createWebHashHistory(import.meta.env.BASE_URL),
+  routes: routes.map(route => {
+    return { path: route.path, name: route.name, component: route.page_component };
+  }),
+});
+
+const app = createApp(MainView);
+app.use(router);
+app.mount('#app');
