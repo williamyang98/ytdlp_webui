@@ -251,6 +251,16 @@ impl TranscodeWorkers {
                 if download_worker.get_status() != WorkerStatus::Finished {
                     return Err(anyhow::anyhow!("Transcode worker failed because download worker failed: {0}", key.as_str()));
                 }
+                {
+                    database
+                        .connect()?
+                        .select_and_update_ffmpeg_entry(&key, move |entry| {
+                            entry.status = WorkerStatus::Running;
+                        })?;
+                    let mut state = worker.state.lock().unwrap();
+                    state.worker_status = WorkerStatus::Running;
+                    worker.condvar.notify_all();
+                }
                 // determine audio path
                 let input_filepath: PathBuf = {
                     let entry = database
@@ -308,16 +318,6 @@ impl TranscodeWorkers {
             let worker = worker.clone();
             let database = self.database.clone();
             move || -> anyhow::Result<()> {
-                {
-                    database
-                        .connect()?
-                        .select_and_update_ffmpeg_entry(&key, move |entry| {
-                            entry.status = WorkerStatus::Running;
-                        })?;
-                    let mut state = worker.state.lock().unwrap();
-                    state.worker_status = WorkerStatus::Running;
-                    worker.condvar.notify_all();
-                }
                 match inner_runner() {
                     Err(err) => {
                         database
