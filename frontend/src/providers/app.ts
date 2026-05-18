@@ -177,12 +177,10 @@ export class App {
   }
 
   async delete_download(key: DownloadKey) {
-    const res = await api.delete_download(key);
-    if (res.type === "success") {
-      const index = this.downloads.findIndex(v => v.video_id === key);
-      if (index >= 0) {
-        this.downloads.splice(index, 1);
-      }
+    const _res = await api.delete_download(key);
+    const index = this.downloads.findIndex(v => v.video_id === key);
+    if (index >= 0) {
+      this.downloads.splice(index, 1);
     }
     this.download_workers[key] = undefined;
     if (this.selected_download_key === key) {
@@ -191,12 +189,10 @@ export class App {
   }
 
   async delete_transcode(key: TranscodeKey) {
-    const res = await api.delete_transcode(key);
-    if (res.type === "success") {
-      const index = this.transcodes.findIndex(v => v.video_id === key.video_id && v.audio_ext === key.audio_ext);
-      if (index >= 0) {
-        this.transcodes.splice(index, 1);
-      }
+    const _res = await api.delete_transcode(key);
+    const index = this.transcodes.findIndex(v => v.video_id === key.video_id && v.audio_ext === key.audio_ext);
+    if (index >= 0) {
+      this.transcodes.splice(index, 1);
     }
     const record_key = get_transcode_worker_key(key);
     this.transcode_workers[record_key] = undefined;

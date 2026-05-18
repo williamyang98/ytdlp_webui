@@ -29,9 +29,7 @@ pub enum DeleteFileResult {
     Failure { filename: PathBuf, reason: String },
 }
 
-#[derive(Debug,Serialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug)]
 pub enum DeleteResponse {
     Busy,
     Success { paths: Vec<DeleteFileResult> },

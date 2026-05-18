@@ -6,6 +6,7 @@ import { format_date } from "../utility/format.ts";
 import { get_data_url } from "../api/api.ts";
 import { ref, computed } from "vue";
 import { providers } from "../providers/providers.ts";
+import { is_worker_running } from "../api/ytdlp_api_schema.ts";
 
 const app = providers.app;
 
@@ -142,7 +143,7 @@ const sorted_items = computed(() => {
           </a>
         </td>
         <td>
-          <button class="btn btn-error btn-sm px-1" @click.stop="delete_download(item)">
+          <button class="btn btn-error btn-sm px-1" @click.stop="delete_download(item)" :disabled="is_worker_running(item.status)">
             <Trash2 class="size-5"/>
           </button>
         </td>

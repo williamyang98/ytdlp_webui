@@ -71,10 +71,7 @@ export const DeleteFileResultSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("failure"), filename: z.string(), reason: z.string() }),
 ]);
 
-export const DeleteResponseSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("busy") }),
-  z.object({ type: z.literal("success"), paths: DeleteFileResultSchema.array() }),
-]);
+export const DeleteResponseSchema = DeleteFileResultSchema.array();
 
 export const RequestTranscodeResponseSchema = z.object({
   download_status: WorkerStatusSchema,

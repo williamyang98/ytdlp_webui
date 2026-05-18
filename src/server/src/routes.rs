@@ -2,7 +2,7 @@ use actix_web::http::StatusCode;
 use actix_web::http::header::{ContentDisposition, ContentType, DispositionParam, DispositionType}; 
 use actix_web::{error, web, HttpRequest, HttpResponse};
 use anyhow::Context;
-use app::app::App;
+use app::app::{App, DeleteResponse};
 use app::database::{AudioExtension, VideoId, VideoIdError, WorkerStatus, TranscodeKey};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,10 @@ pub async fn delete_download(req: HttpRequest, path: web::Path<String>) -> actix
     let Some(result) = result else {
         return Ok(HttpResponse::NotFound().finish());
     };
-    Ok(HttpResponse::Ok().json(result))
+    match result {
+        DeleteResponse::Busy => Ok(HttpResponse::Conflict().body("Download worker is busy")), 
+        DeleteResponse::Success { paths } => Ok(HttpResponse::Ok().json(paths)),
+    }
 }
 
 #[actix_web::get("/delete_transcode/{video_id}/{extension}")]
@@ -113,7 +116,10 @@ pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)
     let Some(result) = result else {
         return Ok(HttpResponse::NotFound().finish());
     };
-    Ok(HttpResponse::Ok().json(result))
+    match result {
+        DeleteResponse::Busy => Ok(HttpResponse::Conflict().body("Transcode worker is busy")), 
+        DeleteResponse::Success { paths } => Ok(HttpResponse::Ok().json(paths)),
+    }
 }
 
 #[actix_web::get("/get_downloads")]
