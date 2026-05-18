@@ -6,6 +6,7 @@ mkdir -p $path/
 cp ./target/$build_type/*.exe $path/
 cp ./README.md $path/
 cp ./LICENSE $path/
+cp ./scripts/.env_windows $path/.env
 cp -rf --parents ./data/binaries/*.exe $path/
 cp -rf ./static/ $path/
 cp -rf ./scripts/ $path/

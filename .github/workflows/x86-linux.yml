@@ -67,6 +67,7 @@ jobs:
         cp ./target/${{env.BUILD_TYPE}}/cli ${{env.PACKAGE_DIR}}/
         cp ./README.md ${{env.PACKAGE_DIR}}/
         cp ./LICENSE ${{env.PACKAGE_DIR}}/
+        cp ./scripts/.env_linux $path/.env
         cp -rf ./static/ ${{env.PACKAGE_DIR}}/
         cp -rf ./scripts/ ${{env.PACKAGE_DIR}}/
         cp -rf ./docs/ ${{env.PACKAGE_DIR}}/
