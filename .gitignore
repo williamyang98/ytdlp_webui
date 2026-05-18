@@ -5,4 +5,5 @@
 /data/
 /package/
 /bin/
+/static/
 Cargo.lock
