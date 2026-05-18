@@ -17,6 +17,7 @@ export class DownloadWorker {
   state: DownloadState | null;
   error: string | null;
   total_requests: number;
+  is_running: boolean;
   promise: Promise<void> | null;
 
   constructor(key: DownloadKey) {
@@ -24,13 +25,15 @@ export class DownloadWorker {
     this.state = null;
     this.error = null;
     this.total_requests = 0;
+    this.is_running = false;
     this.promise = null;
   }
 
-  async listen(force?: boolean) {
-    if (force !== true && this.promise !== null) {
+  async listen(restart_if_idle?: boolean) {
+    if (this.promise !== null && (this.is_running || !restart_if_idle)) {
       return this.promise;
     }
+    this.is_running = true;
     this.promise = null;
     this.state = null;
     this.error = null;
@@ -49,6 +52,7 @@ export class DownloadWorker {
         }
         await sleep(1000);
       }
+      this.is_running = false;
     }
     this.promise = runner();
     return this.promise;
@@ -60,6 +64,7 @@ export class TranscodeWorker {
   state: TranscodeState | null;
   error: string | null;
   total_requests: number;
+  is_running: boolean;
   promise: Promise<void> | null;
 
   constructor(key: TranscodeKey) {
@@ -67,13 +72,15 @@ export class TranscodeWorker {
     this.state = null;
     this.error = null;
     this.total_requests = 0;
+    this.is_running = false;
     this.promise = null;
   }
 
-  async listen(force?: boolean) {
-    if (force !== true && this.promise !== null) {
+  async listen(restart_if_idle?: boolean) {
+    if (this.promise !== null && (this.is_running || !restart_if_idle)) {
       return this.promise;
     }
+    this.is_running = true;
     this.promise = null;
     this.state = null;
     this.error = null;
@@ -92,6 +99,7 @@ export class TranscodeWorker {
         }
         await sleep(1000);
       }
+      this.is_running = false;
     }
     this.promise = runner();
     return this.promise;
