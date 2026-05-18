@@ -2,7 +2,6 @@ use anyhow::Context;
 use app::github_api::{DateTimeRfc3339, get_github_releases};
 use clap::Parser;
 use futures_util::StreamExt;
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
@@ -124,6 +123,7 @@ async fn download_file(tagged_asset: &TaggedAsset, output_path: &Path) -> anyhow
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     download_file(
         &TaggedAsset {
@@ -144,7 +144,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     ).await?;
 
 
-    lazy_static! {
+    lazy_static::lazy_static! {
         static ref EXTRA_7ZIP_FILENAME_REGEX: Regex = Regex::new(
             r"7z.*extra.*\.7z"
         ).unwrap();
@@ -159,7 +159,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
         &binaries_folder.join("7z-extra.7z"),
     ).await?;
 
-    lazy_static! {
+    lazy_static::lazy_static! {
         static ref FFMPEG_WIN64_FILENAME_REGEX: Regex = Regex::new(
             r"ffmpeg.*win64.*gpl.*\.zip"
         ).unwrap();
@@ -178,6 +178,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 async fn extract_files(binaries_folder: &Path) -> anyhow::Result<()> {
     use std::process::Command;
     let zip_minimal_executable_path = binaries_folder.join("7zr.exe")
@@ -224,6 +225,34 @@ async fn extract_files(binaries_folder: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+async fn update_files(binaries_folder: &Path) -> anyhow::Result<()> {
+    download_files(binaries_folder).await?;
+    extract_files(binaries_folder).await?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn update_files(binaries_folder: &Path) -> anyhow::Result<()> {
+    download_file(
+        &TaggedAsset {
+            owner: "yt-dlp".to_owned(),
+            repo: "yt-dlp".to_owned(),
+            filename: TaggedFilename::String("yt-dlp".to_owned()),
+        },
+        &binaries_folder.join("yt-dlp"),
+    ).await?;
+
+    log::info!("Install packages for linux using ./scripts/download_ubuntu.sh");
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+async fn update_files(binaries_folder: &Path) -> anyhow::Result<()> {
+    log::info!("Nothing to update for this platform");
+    Ok(())
+}
+
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -234,8 +263,8 @@ async fn main() -> anyhow::Result<()> {
 
     std::fs::create_dir_all(&args.binaries_folder)
         .context("Failed to open binaries folder")?;
-    download_files(&args.binaries_folder).await?;
-    extract_files(&args.binaries_folder).await?;
+
+    update_files(&args.binaries_folder).await?;
 
     Ok(())
 }

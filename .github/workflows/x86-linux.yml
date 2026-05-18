@@ -61,16 +61,7 @@ jobs:
 
     - name: Copy files
       shell: bash
-      run: |
-        mkdir -p ${{env.PACKAGE_DIR}}
-        cp ./target/${{env.BUILD_TYPE}}/server ${{env.PACKAGE_DIR}}/
-        cp ./target/${{env.BUILD_TYPE}}/cli ${{env.PACKAGE_DIR}}/
-        cp ./README.md ${{env.PACKAGE_DIR}}/
-        cp ./LICENSE ${{env.PACKAGE_DIR}}/
-        cp ./scripts/.env_linux $path/.env
-        cp -rf ./static/ ${{env.PACKAGE_DIR}}/
-        cp -rf ./scripts/ ${{env.PACKAGE_DIR}}/
-        cp -rf ./docs/ ${{env.PACKAGE_DIR}}/
+      run: ./scripts/create_package_linux.sh ${{env.PACKAGE_DIR}} ${{env.BUILD_TYPE}}
 
     - name: Upload files
       uses: actions/upload-artifact@v4
