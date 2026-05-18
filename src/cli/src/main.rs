@@ -232,6 +232,8 @@ async fn main() -> anyhow::Result<()> {
     }
     env_logger::init();
 
+    std::fs::create_dir_all(&args.binaries_folder)
+        .context("Failed to open binaries folder")?;
     download_files(&args.binaries_folder).await?;
     extract_files(&args.binaries_folder).await?;
 
