@@ -1,5 +1,4 @@
 use anyhow::Context;
-use app::app_config::AppConfig;
 use app::github_api::{DateTimeRfc3339, get_github_releases};
 use clap::Parser;
 use futures_util::StreamExt;
@@ -11,33 +10,15 @@ use std::path::{Path, PathBuf};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Maximum number of transcode threads
-    #[arg(long, default_value_t = 0)]
-    total_transcode_threads: usize,
-    /// Data folder
-    #[arg(long, default_value = "./data", value_parser = validate_is_directory_empty_or_exists)]
-    data_folder: PathBuf,
-    /// Static website folder
-    #[arg(long, default_value = "./static", value_parser = validate_is_directory_empty_or_exists)]
-    static_folder: PathBuf,
-    /// Environment file
-    #[arg(long, default_value = ".env", value_parser = validate_is_file_exists)]
-    env_file: PathBuf,
+    /// Binaries folder
+    #[arg(long, default_value = "./bin", value_parser = validate_is_directory_empty_or_exists)]
+    binaries_folder: PathBuf,
 }
 
 fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(s);
     if path.exists() && !path.is_dir() {
         Err("Cannot write to existing path that is not a directory".into())
-    } else {
-        Ok(path)
-    }
-}
-
-fn validate_is_file_exists(s: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(s);
-    if !path.is_file() {
-        Err("File is missing".into())
     } else {
         Ok(path)
     }
@@ -143,14 +124,14 @@ async fn download_file(tagged_asset: &TaggedAsset, output_path: &Path) -> anyhow
     Ok(())
 }
 
-async fn download_files(app_config: &AppConfig) -> anyhow::Result<()> {
+async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     download_file(
         &TaggedAsset {
             owner: "yt-dlp".to_owned(),
             repo: "yt-dlp".to_owned(),
             filename: TaggedFilename::String("yt-dlp.exe".to_owned()),
         },
-        &app_config.binaries_folder.join("yt-dlp.exe"),
+        &binaries_folder.join("yt-dlp.exe"),
     ).await?;
 
     download_file(
@@ -159,7 +140,7 @@ async fn download_files(app_config: &AppConfig) -> anyhow::Result<()> {
             repo: "7zip".to_owned(),
             filename: TaggedFilename::String("7zr.exe".to_owned()),
         },
-        &app_config.binaries_folder.join("7zr.exe"),
+        &binaries_folder.join("7zr.exe"),
     ).await?;
 
 
@@ -175,7 +156,7 @@ async fn download_files(app_config: &AppConfig) -> anyhow::Result<()> {
             repo: "7zip".to_owned(),
             filename: TaggedFilename::Regex(EXTRA_7ZIP_FILENAME_REGEX.clone()),
         },
-        &app_config.binaries_folder.join("7z-extra.7z"),
+        &binaries_folder.join("7z-extra.7z"),
     ).await?;
 
     lazy_static! {
@@ -191,18 +172,18 @@ async fn download_files(app_config: &AppConfig) -> anyhow::Result<()> {
             repo: "FFmpeg-Builds".to_owned(),
             filename: TaggedFilename::Regex(FFMPEG_WIN64_FILENAME_REGEX.clone()),
         },
-        &app_config.binaries_folder.join("ffmpeg.zip"),
+        &binaries_folder.join("ffmpeg.zip"),
     ).await?;
 
     Ok(())
 }
 
-async fn extract_files(app_config: &AppConfig) -> anyhow::Result<()> {
+async fn extract_files(binaries_folder: &Path) -> anyhow::Result<()> {
     use std::process::Command;
-    let zip_minimal_executable_path = app_config.binaries_folder.join("7zr.exe")
+    let zip_minimal_executable_path = binaries_folder.join("7zr.exe")
         .canonicalize()
         .context("Failed to find 7zip minimal executable path")?;
-    let zip_extras_archive_path = app_config.binaries_folder.join("7z-extra.7z")
+    let zip_extras_archive_path = binaries_folder.join("7z-extra.7z")
         .canonicalize()
         .context("Failed to find 7zip extra archive path")?;
 
@@ -211,7 +192,7 @@ async fn extract_files(app_config: &AppConfig) -> anyhow::Result<()> {
         .arg("-y")
         .arg(&zip_extras_archive_path)
         .arg("7za.exe")
-        .current_dir(&app_config.binaries_folder)
+        .current_dir(binaries_folder)
         .output()
         .context("Failed to unzip 7zip minimal executable")?;
     if !output.status.success() {
@@ -220,10 +201,10 @@ async fn extract_files(app_config: &AppConfig) -> anyhow::Result<()> {
     }
     log::info!("Unzipped 7zip extras executable");
 
-    let zip_extras_executable_path = app_config.binaries_folder.join("7za.exe")
+    let zip_extras_executable_path = binaries_folder.join("7za.exe")
         .canonicalize()
         .context("Failed to find 7zip extras executable path")?;
-    let ffmpeg_archive_path = app_config.binaries_folder.join("ffmpeg.zip")
+    let ffmpeg_archive_path = binaries_folder.join("ffmpeg.zip")
         .canonicalize()
         .context("Failed to find ffmpeg archive path")?;
     let output = Command::new(&zip_extras_executable_path)
@@ -231,7 +212,7 @@ async fn extract_files(app_config: &AppConfig) -> anyhow::Result<()> {
         .arg("-y")
         .arg(&ffmpeg_archive_path)
         .arg("*/bin/ffmpeg.exe")
-        .current_dir(&app_config.binaries_folder)
+        .current_dir(binaries_folder)
         .output()
         .context("Failed to unzip ffmpeg minimal executable")?;
     if !output.status.success() {
@@ -246,21 +227,13 @@ async fn extract_files(app_config: &AppConfig) -> anyhow::Result<()> {
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let total_transcode_threads: usize = match args.total_transcode_threads {
-        0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
-        x => x,
-    };
-
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "INFO");
     }
     env_logger::init();
 
-    let mut app_config = AppConfig::new(&args.env_file, &args.data_folder, &args.static_folder)?;
-    app_config.total_transcode_threads = total_transcode_threads;
-
-    download_files(&app_config).await?;
-    extract_files(&app_config).await?;
+    download_files(&args.binaries_folder).await?;
+    extract_files(&args.binaries_folder).await?;
 
     Ok(())
 }

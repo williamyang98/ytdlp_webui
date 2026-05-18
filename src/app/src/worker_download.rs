@@ -352,17 +352,15 @@ impl DownloadWorkers {
 
 fn create_download_command(video_id: &VideoId, output_dirpath: &Path, app_config: &AppConfig) -> anyhow::Result<Command> {
     let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
-    let ytdlp_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("yt-dlp.exe"))?;
-    let ffmpeg_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("ffmpeg.exe"))?;
     // Can't canonicalize since path doesn't exist yet
     let output_filepath = output_dirpath.join("%(id)s.%(ext)s");
     let output_filepath = std::path::absolute(&output_filepath)
         .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
-    let mut command = Command::new(ytdlp_binary_path);
-    command.current_dir(&app_config.binaries_folder);
+    let mut command = Command::new(&app_config.ytdlp_command);
+    command.current_dir(&app_config.current_working_directory);
     command.args(ytdlp::get_ytdlp_arguments(
         url.as_str(),
-        ffmpeg_binary_path.to_str().expect("Failed to turn ffmpeg binary path into UTF-8 string"),
+        &app_config.ffmpeg_command.to_string_lossy(),
         output_filepath.to_str().expect("Failed to turn output filepath into UTF-8 string"),
     ));
     Ok(command)

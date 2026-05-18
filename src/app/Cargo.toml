@@ -25,3 +25,4 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 threadpool = { workspace = true }
 time = { workspace = true }
+which = { workspace = true }

@@ -31,6 +31,7 @@ serde_json = { version = "1.0" }
 thiserror = { version = "1.0.63" }
 threadpool = { version = "1.8.1" }
 time = { version = "0.3.47", features = ["serde", "parsing", "formatting"] }
+which = { version = "8.0.2" }
 
 [profile.release-with-debug]
 inherits = "release"

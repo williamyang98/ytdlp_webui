@@ -362,10 +362,9 @@ fn create_transcode_command(
     metadata: Option<&YoutubeMetadata>,
     app_config: &AppConfig,
 ) -> anyhow::Result<Command> {
-    let ffmpeg_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("ffmpeg.exe"))?;
-    let mut command = Command::new(ffmpeg_binary_path);
+    let mut command = Command::new(&app_config.ffmpeg_command);
     let args = ffmpeg::create_ffmpeg_transcode_arguments(input_path, output_path, &key.video_id, key.audio_ext, metadata);
-    command.current_dir(&app_config.binaries_folder);
+    command.current_dir(&app_config.current_working_directory);
     command.args(args.as_slice());
     Ok(command)
 }

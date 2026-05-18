@@ -9,11 +9,26 @@ pub struct AppConfig {
     pub static_folder: PathBuf,
     pub downloads_folder: PathBuf,
     pub transcodes_folder: PathBuf,
-    pub binaries_folder: PathBuf,
     pub metadata_folder: PathBuf,
     pub database_path: PathBuf,
     pub total_transcode_threads: usize,
-    pub youtube_api_key: YoutubeApiKey
+    pub youtube_api_key: YoutubeApiKey,
+    pub ffmpeg_command: PathBuf,
+    pub ytdlp_command: PathBuf,
+}
+
+fn get_environment_variable(key: &'static str) -> anyhow::Result<String> {
+    std::env::var(key).context(format!("Missing {0}", key))
+}
+
+fn get_command_from_environment_variable(key: &'static str) -> anyhow::Result<PathBuf> {
+    let command = get_environment_variable(key)?;
+    if command.is_empty() {
+        return Err(anyhow::anyhow!("Got empty command string for environment variable {0}", key));
+    }
+    let command = which::which(&command)
+        .with_context(|| format!("Failed to find binary path for {0}: {1}", key, &command))?;
+    Ok(command)
 }
 
 impl AppConfig {
@@ -21,10 +36,13 @@ impl AppConfig {
         dotenvy::from_path(env_file)
             .with_context(|| anyhow::anyhow!("Failed to read dotenv file at: {0}", env_file.to_string_lossy()))?;
 
-        const ENV_YOUTUBE_API_KEY: &str = "YOUTUBE_API_KEY";
-        let youtube_api_key = std::env::var(ENV_YOUTUBE_API_KEY)
-            .context(format!("Missing {0}", ENV_YOUTUBE_API_KEY))?;
+        let youtube_api_key = get_environment_variable("YOUTUBE_API_KEY")?;
         let youtube_api_key = validate_youtube_api_key(&youtube_api_key)?;
+
+        let ffmpeg_command = get_command_from_environment_variable("FFMPEG_BIN")?;
+        log::debug!("Got ffmpeg command: {0}", &ffmpeg_command.to_string_lossy());
+        let ytdlp_command = get_command_from_environment_variable("YTDLP_BIN")?;
+        log::debug!("Got ytdlp command: {0}", &ytdlp_command.to_string_lossy());
 
         let data_folder = data_folder.to_path_buf();
         let static_folder = static_folder.to_path_buf();
@@ -38,7 +56,6 @@ impl AppConfig {
 
         let downloads_folder = data_folder.join("downloads");
         let transcodes_folder = data_folder.join("transcodes");
-        let binaries_folder = data_folder.join("binaries");
         let metadata_folder = data_folder.join("metadata");
         let database_path = data_folder.join("index.db");
         let current_working_directory = std::env::current_dir()
@@ -52,7 +69,6 @@ impl AppConfig {
         create_folder(&data_folder)?;
         create_folder(&downloads_folder)?;
         create_folder(&transcodes_folder)?;
-        create_folder(&binaries_folder)?;
         create_folder(&metadata_folder)?;
 
         if !static_folder.exists() {
@@ -71,10 +87,11 @@ impl AppConfig {
             static_folder,
             downloads_folder,
             transcodes_folder,
-            binaries_folder,
             metadata_folder,
             database_path,
             youtube_api_key,
+            ffmpeg_command,
+            ytdlp_command,
             total_transcode_threads: 8,
         })
     }
@@ -90,16 +107,6 @@ impl AppConfig {
             },
         };
         Ok(relative_path.to_path_buf())
-    }
-
-    pub fn get_absolute_binary_filepath(&self, relative_filepath: &Path) -> anyhow::Result<PathBuf> {
-        let absolute_filepath = self.binaries_folder.join(relative_filepath);
-        let absolute_filepath = std::path::absolute(&absolute_filepath)
-            .with_context(|| format!("Failed to get absolute binary filepath from: {0}", absolute_filepath.to_string_lossy()))?;
-        if !absolute_filepath.is_file() {
-            return Err(anyhow::anyhow!("Absolute binary filepath does not exist: {0}", absolute_filepath.to_string_lossy()));
-        }
-        Ok(absolute_filepath)
     }
 
     pub fn get_absolute_data_path(&self, relative_path: &Path) -> anyhow::Result<PathBuf> {
