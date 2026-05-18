@@ -27,6 +27,9 @@ struct Args {
     /// Static website folder
     #[arg(long, default_value = "./static", value_parser = validate_is_directory_empty_or_exists)]
     static_folder: PathBuf,
+    /// Environment file
+    #[arg(long, default_value = ".env", value_parser = validate_is_file_exists)]
+    env_file: PathBuf,
     /// Enable cross origin resource sharing (CORS)
     #[arg(long)]
     enable_cors: bool,
@@ -36,6 +39,15 @@ fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(s);
     if path.exists() && !path.is_dir() {
         Err("Cannot write to existing path that is not a directory".into())
+    } else {
+        Ok(path)
+    }
+}
+
+fn validate_is_file_exists(s: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(s);
+    if !path.is_file() {
+        Err("File is missing".into())
     } else {
         Ok(path)
     }
@@ -57,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
         0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
         x => x,
     };
-    let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
+    let mut app_config = AppConfig::new(&args.env_file, &args.data_folder, &args.static_folder)?;
     app_config.total_transcode_threads = total_transcode_threads;
     let app = App::new(app_config.clone())?;
     let app = Arc::new(app);

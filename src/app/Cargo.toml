@@ -10,6 +10,7 @@ dashmap = { workspace = true }
 derive_more = { workspace = true }
 diesel = { workspace = true }
 diesel_migrations = { workspace = true }
+dotenvy = { workspace = true }
 dyn-clone = { workspace = true }
 lazy_static = { workspace = true }
 libsqlite3-sys = { workspace = true }

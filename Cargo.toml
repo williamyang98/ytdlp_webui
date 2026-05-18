@@ -13,6 +13,7 @@ dashmap = { version = "6.0.1" }
 derive_more = { version = "2.1.1", features = ["from", "debug"] }
 diesel = { version = "2.3.9", features = ["sqlite", "r2d2"] }
 diesel_migrations = { version = "2.3.2" }
+dotenvy = { version = "0.15.7" }
 dyn-clone = { version = "1.0.20" }
 env_logger = { version = "0.11.3" }
 futures-util = { version = "0.3.32" }

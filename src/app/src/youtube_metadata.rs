@@ -2,15 +2,18 @@ use crate::database::VideoId;
 use dashmap::DashMap;
 use serde::{Serialize, Deserialize};
 use std::{collections::HashMap, sync::Arc};
+use lazy_static::lazy_static;
+use regex::Regex;
 
 pub type YoutubeMetadataCache = Arc<DashMap<VideoId, Arc<YoutubeMetadata>>>;
 
-// TODO: Your api key got leaked dumbass, it's hitting the quota limit
-pub fn get_metadata_url(video_id: &str) -> String {
+#[derive(Clone,Debug)]
+pub struct YoutubeApiKey(String);
+
+pub fn get_metadata_url(video_id: &str, api_key: &YoutubeApiKey) -> String {
     const URL: &str = "https://www.googleapis.com/youtube/v3/videos";
     const PARTS: &str = "snippet,contentDetails";
-    const API_KEY: &str = "AIzaSyDkmFSz9gH9slSnonGjs8TZEjtAKS4e9cg";
-    format!("{URL}?part={PARTS}&id={video_id}&key={API_KEY}")
+    format!("{URL}?part={PARTS}&id={video_id}&key={0}", &api_key.0)
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
@@ -77,10 +80,20 @@ pub struct YoutubeMetadata {
     pub page_info: PageInfo,
 }
 
-pub async fn get_youtube_metadata(video_id: &VideoId) -> anyhow::Result<YoutubeMetadata> {
-    let metadata_url = get_metadata_url(video_id.as_str());
+pub async fn get_youtube_metadata(video_id: &VideoId, key: &YoutubeApiKey) -> anyhow::Result<YoutubeMetadata> {
+    let metadata_url = get_metadata_url(video_id.as_str(), key);
     let response = reqwest::get(metadata_url).await?;
     let metadata = response.text().await?;
     let metadata: YoutubeMetadata = serde_json::from_str(metadata.as_str())?;
     Ok(metadata)
+}
+
+pub fn validate_youtube_api_key(key: &str) -> anyhow::Result<YoutubeApiKey> {
+    lazy_static! {
+        static ref YOUTUBE_API_KEY_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9\\.\-\_]{24,}$").unwrap();
+    }
+    if !YOUTUBE_API_KEY_REGEX.is_match(key) {
+        return Err(anyhow::anyhow!("Invalid youtube api key: {0}", key));
+    }
+    Ok(YoutubeApiKey(key.to_owned()))
 }

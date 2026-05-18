@@ -20,12 +20,24 @@ struct Args {
     /// Static website folder
     #[arg(long, default_value = "./static", value_parser = validate_is_directory_empty_or_exists)]
     static_folder: PathBuf,
+    /// Environment file
+    #[arg(long, default_value = ".env", value_parser = validate_is_file_exists)]
+    env_file: PathBuf,
 }
 
 fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(s);
     if path.exists() && !path.is_dir() {
         Err("Cannot write to existing path that is not a directory".into())
+    } else {
+        Ok(path)
+    }
+}
+
+fn validate_is_file_exists(s: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(s);
+    if !path.is_file() {
+        Err("File is missing".into())
     } else {
         Ok(path)
     }
@@ -244,7 +256,7 @@ async fn main() -> anyhow::Result<()> {
     }
     env_logger::init();
 
-    let mut app_config = AppConfig::new(&args.data_folder, &args.static_folder)?;
+    let mut app_config = AppConfig::new(&args.env_file, &args.data_folder, &args.static_folder)?;
     app_config.total_transcode_threads = total_transcode_threads;
 
     download_files(&app_config).await?;

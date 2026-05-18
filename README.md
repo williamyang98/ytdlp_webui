@@ -15,9 +15,13 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 ## Gallery
 ![Screenshot](./docs/screenshot_webpage.png)
 
-## Building
+## Building from source
 1. Download rust
 2. Download packages using ```./scripts/download_*.sh``` for your platform if required
 3. Build programs: ```cargo build -r```
 4. Download binaries: ```cargo run -r --bin cli```
-5. Run server: ```cargo run -r --bin server```
+5. Copy environment file ```./scripts/.env_*``` for your platform and rename it to ```.env``` in the root folder
+
+## Running server
+- Run server: ```cargo run -r --bin server```
+- Update binaries: ```cargo run -r --bin cli```

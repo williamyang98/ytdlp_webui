@@ -93,7 +93,7 @@ impl App {
         let metadata = match metadata {
             Some(metadata) => metadata,
             None => {
-                let metadata = get_youtube_metadata(video_id).await?;
+                let metadata = get_youtube_metadata(video_id, &self.app_config.youtube_api_key).await?;
                 if let Err(err) = write_to_filepath(&filepath, &metadata) {
                     log::error!("Failed to cache metadata to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
                 } else {
@@ -142,7 +142,7 @@ impl App {
         relative_dirs.sort_unstable();
         relative_dirs.dedup();
         for relative_dir in &relative_dirs {
-            match self.app_config.delete_folder(&relative_dir) {
+            match self.app_config.delete_folder(relative_dir) {
                 Ok(()) => {
                     deleted_results.push(DeleteFileResult::Success { filename: relative_dir.clone() });
                 },
@@ -178,7 +178,7 @@ impl App {
         let paths = paths
             .iter()
             .flatten()
-            .map(|v| PathBuf::from(v));
+            .map(PathBuf::from);
         let paths = self.delete_files(paths);
 
         Ok(Some(DeleteResponse::Success { paths }))
@@ -208,7 +208,7 @@ impl App {
         let paths = paths
             .iter()
             .flatten()
-            .map(|v| PathBuf::from(v));
+            .map(PathBuf::from);
         let paths = self.delete_files(paths);
 
         Ok(Some(DeleteResponse::Success { paths }))

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use std::path::{Path, PathBuf};
-
+use crate::youtube_metadata::{YoutubeApiKey, validate_youtube_api_key};
 
 #[derive(Clone,Debug)]
 pub struct AppConfig {
@@ -13,10 +13,19 @@ pub struct AppConfig {
     pub metadata_folder: PathBuf,
     pub database_path: PathBuf,
     pub total_transcode_threads: usize,
+    pub youtube_api_key: YoutubeApiKey
 }
 
 impl AppConfig {
-    pub fn new(data_folder: &Path, static_folder: &Path) -> anyhow::Result<Self> {
+    pub fn new(env_file: &Path, data_folder: &Path, static_folder: &Path) -> anyhow::Result<Self> {
+        dotenvy::from_path(env_file)
+            .with_context(|| anyhow::anyhow!("Failed to read dotenv file at: {0}", env_file.to_string_lossy()))?;
+
+        const ENV_YOUTUBE_API_KEY: &str = "YOUTUBE_API_KEY";
+        let youtube_api_key = std::env::var(ENV_YOUTUBE_API_KEY)
+            .context(format!("Missing {0}", ENV_YOUTUBE_API_KEY))?;
+        let youtube_api_key = validate_youtube_api_key(&youtube_api_key)?;
+
         let data_folder = data_folder.to_path_buf();
         let static_folder = static_folder.to_path_buf();
 
@@ -65,6 +74,7 @@ impl AppConfig {
             binaries_folder,
             metadata_folder,
             database_path,
+            youtube_api_key,
             total_transcode_threads: 8,
         })
     }
@@ -106,7 +116,7 @@ impl AppConfig {
         if absolute_path.starts_with(&self.downloads_folder) { return true; }
         if absolute_path.starts_with(&self.transcodes_folder) { return true; }
         if absolute_path.starts_with(&self.metadata_folder) { return true; }
-        return false;
+        false
     }
 
     pub fn delete_file(&self, relative_path: &Path) -> Result<(), std::io::Error> {
