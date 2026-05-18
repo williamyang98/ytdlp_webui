@@ -92,13 +92,36 @@ impl AppConfig {
         Ok(absolute_filepath)
     }
 
-    pub fn get_absolute_data_filepath(&self, relative_filepath: &Path) -> anyhow::Result<PathBuf> {
-        let absolute_filepath = self.data_folder.join(relative_filepath);
-        let absolute_filepath = std::path::absolute(&absolute_filepath)
-            .with_context(|| format!("Failed to get absolute data filepath from: {0}", absolute_filepath.to_string_lossy()))?;
-        if !absolute_filepath.is_file() {
-            return Err(anyhow::anyhow!("Absolute data filepath does not exist: {0}", absolute_filepath.to_string_lossy()));
+    pub fn get_absolute_data_path(&self, relative_path: &Path) -> anyhow::Result<PathBuf> {
+        let absolute_path = self.data_folder.join(relative_path);
+        let absolute_path = std::path::absolute(&absolute_path)
+            .with_context(|| format!("Failed to get absolute data path from: {0}", absolute_path.to_string_lossy()))?;
+        if !absolute_path.exists() {
+            return Err(anyhow::anyhow!("Absolute data filepath does not exist: {0}", absolute_path.to_string_lossy()));
         }
-        Ok(absolute_filepath)
+        Ok(absolute_path)
+    }
+
+    pub fn check_if_path_whitelisted_for_delete(&self, absolute_path: &Path) -> bool {
+        if absolute_path.starts_with(&self.downloads_folder) { return true; }
+        if absolute_path.starts_with(&self.transcodes_folder) { return true; }
+        if absolute_path.starts_with(&self.metadata_folder) { return true; }
+        return false;
+    }
+
+    pub fn delete_file(&self, relative_path: &Path) -> Result<(), std::io::Error> {
+        let absolute_path = self.data_folder.join(relative_path);
+        if !self.check_if_path_whitelisted_for_delete(&absolute_path) {
+            return Err(std::io::ErrorKind::PermissionDenied.into());
+        }
+        std::fs::remove_file(absolute_path)
+    }
+
+    pub fn delete_folder(&self, relative_path: &Path) -> Result<(), std::io::Error> {
+        let absolute_path = self.data_folder.join(relative_path);
+        if !self.check_if_path_whitelisted_for_delete(&absolute_path) {
+            return Err(std::io::ErrorKind::PermissionDenied.into());
+        }
+        std::fs::remove_dir(absolute_path)
     }
 }

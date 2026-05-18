@@ -25,8 +25,8 @@ pub struct App {
 #[serde(tag = "type")]
 #[serde(rename_all = "lowercase")]
 pub enum DeleteFileResult {
-    Success { filename: String },
-    Failure { filename: String, reason: String },
+    Success { filename: PathBuf },
+    Failure { filename: PathBuf, reason: String },
 }
 
 #[derive(Debug,Serialize)]
@@ -118,6 +118,44 @@ impl App {
         self.download_workers.start_worker(video_id)
     }
 
+    fn delete_files<I, P>(&self, relative_paths: I) -> Vec<DeleteFileResult>
+    where
+        I: IntoIterator<Item = P>,
+        PathBuf: From<P>,
+    {
+        let mut deleted_results = vec![];
+        let mut relative_dirs = vec![];
+        // delete files
+        for relative_path in relative_paths {
+            let relative_path = PathBuf::from(relative_path);
+            match self.app_config.delete_file(&relative_path) {
+                Ok(()) => {
+                    if let Some(relative_dir) = relative_path.parent() {
+                        relative_dirs.push(relative_dir.to_path_buf());
+                    }
+                    deleted_results.push(DeleteFileResult::Success { filename: relative_path.clone() });
+                },
+                Err(err) => {
+                    deleted_results.push(DeleteFileResult::Failure { filename: relative_path.clone(), reason: err.to_string() });
+                },
+            };
+        }
+        // delete folders
+        relative_dirs.sort_unstable();
+        relative_dirs.dedup();
+        for relative_dir in &relative_dirs {
+            match self.app_config.delete_folder(&relative_dir) {
+                Ok(()) => {
+                    deleted_results.push(DeleteFileResult::Success { filename: relative_dir.clone() });
+                },
+                Err(err) => {
+                    deleted_results.push(DeleteFileResult::Failure { filename: relative_dir.clone(), reason: err.to_string() });
+                },
+            }
+        }
+        deleted_results
+    }
+
     pub fn delete_download(&self, video_id: &VideoId) -> anyhow::Result<Option<DeleteResponse>> {
         if let Some(worker) = self.download_workers.get_worker(video_id) {
             if worker.get_status().is_busy() {
@@ -139,21 +177,13 @@ impl App {
         drop(db_conn);
 
         let paths = &[entry.audio_path, entry.stdout_log_path, entry.stderr_log_path, entry.system_log_path];
-        let deleted_files: Vec<DeleteFileResult> = paths
+        let paths = paths
             .iter()
             .flatten()
-            .filter_map(|path| {
-                let abs_path = PathBuf::from(path);
-                let Ok(abs_path) = self.app_config.get_absolute_data_filepath(&abs_path) else {
-                    return None;
-                };
-                match std::fs::remove_file(abs_path) {
-                    Ok(()) => Some(DeleteFileResult::Success { filename: path.clone() }),
-                    Err(err) => Some(DeleteFileResult::Failure { filename: path.clone(), reason: err.to_string() }),
-                }
-            })
-            .collect();
-        Ok(Some(DeleteResponse::Success { paths: deleted_files }))
+            .map(|v| PathBuf::from(v));
+        let paths = self.delete_files(paths);
+
+        Ok(Some(DeleteResponse::Success { paths }))
     }
 
     pub fn delete_transcode(&self, key: &TranscodeKey) -> anyhow::Result<Option<DeleteResponse>> {
@@ -177,21 +207,13 @@ impl App {
         drop(db_conn);
 
         let paths = &[entry.audio_path, entry.stdout_log_path, entry.stderr_log_path, entry.system_log_path];
-        let deleted_files: Vec<DeleteFileResult> = paths
+        let paths = paths
             .iter()
             .flatten()
-            .filter_map(|path| {
-                let abs_path = PathBuf::from(path);
-                let Ok(abs_path) = self.app_config.get_absolute_data_filepath(&abs_path) else {
-                    return None;
-                };
-                match std::fs::remove_file(abs_path) {
-                    Ok(()) => Some(DeleteFileResult::Success { filename: path.clone() }),
-                    Err(err) => Some(DeleteFileResult::Failure { filename: path.clone(), reason: err.to_string() }),
-                }
-            })
-            .collect();
-        Ok(Some(DeleteResponse::Success { paths: deleted_files }))
+            .map(|v| PathBuf::from(v));
+        let paths = self.delete_files(paths);
+
+        Ok(Some(DeleteResponse::Success { paths }))
     }
 
     pub fn get_downloads(&self) -> anyhow::Result<Vec<YtdlpRow>> {
@@ -238,7 +260,7 @@ impl App {
         let Some(audio_path) = entry.audio_path else {
             return Ok(None);
         };
-        let path = self.app_config.get_absolute_data_filepath(&PathBuf::from(audio_path))?;
+        let path = self.app_config.get_absolute_data_path(&PathBuf::from(audio_path))?;
         if !path.is_file() {
             return Ok(None);
         }
