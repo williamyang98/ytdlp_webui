@@ -142,7 +142,7 @@ const sorted_items = computed(() => {
           </a>
         </td>
         <td>
-          <button class="btn btn-error btn-sm px-1" @click="delete_download(item)">
+          <button class="btn btn-error btn-sm px-1" @click.stop="delete_download(item)">
             <Trash2 class="size-5"/>
           </button>
         </td>

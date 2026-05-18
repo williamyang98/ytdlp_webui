@@ -166,7 +166,7 @@ const sorted_items = computed(() => {
           </a>
         </td>
         <td>
-          <button class="btn btn-error btn-sm px-1" @click="delete_transcode(item)">
+          <button class="btn btn-error btn-sm px-1" @click.stop="delete_transcode(item)">
             <Trash2 class="size-5"/>
           </button>
         </td>
