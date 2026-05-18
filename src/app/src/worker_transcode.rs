@@ -261,7 +261,7 @@ impl TranscodeWorkers {
                     state.worker_status = WorkerStatus::Running;
                     worker.condvar.notify_all();
                 }
-                // determine audio path
+                // determine input audio path
                 let input_filepath: PathBuf = {
                     let entry = database
                         .connect()?
@@ -277,15 +277,16 @@ impl TranscodeWorkers {
                     }
                     input_filepath
                 };
-                let output_filepath = app_config.transcodes_folder.join(key.as_str());
+                // get output filepath
+                let output_dirpath = format!("{0}_{1}", key.video_id.as_str(), key.audio_ext.as_str());
+                let output_dirpath = app_config.transcodes_folder.join(output_dirpath);
+                let output_filepath = output_dirpath.join(key.as_str());
                 let output_filepath = std::path::absolute(&output_filepath)
                     .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
                 let relative_output_filepath = app_config.get_relative_data_path(&output_filepath)
                     .with_context(|| format!("Failed to get relative output filepath from: {0}", output_filepath.to_string_lossy()))?;
                 // setup process
-                let log_dirpath = format!("{0}_{1}", key.video_id.as_str(), key.audio_ext.as_str());
-                let log_dirpath = app_config.transcodes_folder.join(log_dirpath);
-                let mut process = ProcessWorker::new(threadpool.clone(), log_dirpath);
+                let mut process = ProcessWorker::new(threadpool.clone(), &output_dirpath);
                 let command = create_transcode_command(&key, &input_filepath, &output_filepath, metadata.as_deref(), &app_config)?;
                 process.label = Some(format!("transcode_{0}", key.as_str()));
                 let stderr_handler = FfmpegStderrHandler::new(worker.clone());

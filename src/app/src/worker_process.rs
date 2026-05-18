@@ -2,7 +2,7 @@ use crate::util::ConvertCarriageReturnToNewLine;
 use dyn_clone::DynClone;
 use std::io::{BufReader, BufWriter, Write, Read, BufRead};
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, Condvar};
 use thiserror::Error;
@@ -51,7 +51,8 @@ pub struct ProcessWorker {
 }
 
 impl ProcessWorker {
-    pub fn new(threadpool: Arc<ThreadPool>, logging_folder: PathBuf) -> Self {
+    pub fn new(threadpool: Arc<ThreadPool>, logging_folder: &Path) -> Self {
+        let logging_folder = logging_folder.to_path_buf();
         let stdout_filename = logging_folder.join("stdout.log");
         let stderr_filename = logging_folder.join("stderr.log");
         let system_log_filename = logging_folder.join("system.log");

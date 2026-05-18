@@ -8,7 +8,7 @@ use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
 use threadpool::ThreadPool;
@@ -242,10 +242,10 @@ impl DownloadWorkers {
             let worker = worker.clone();
             move || -> anyhow::Result<()> {
                 // setup process
-                let log_dirpath = app_config.downloads_folder.join(video_id.as_str());
-                let mut process = ProcessWorker::new(threadpool.clone(), log_dirpath);
+                let output_dirpath = app_config.downloads_folder.join(video_id.as_str());
+                let mut process = ProcessWorker::new(threadpool.clone(), &output_dirpath);
                 process.label = Some(format!("download_{0}", video_id.as_str()));
-                let command = create_download_command(&video_id, &app_config)?;
+                let command = create_download_command(&video_id, &output_dirpath, &app_config)?;
                 let stdout_handler = Box::new(YtdlpStdoutHandler::new(worker.clone()));
                 let stderr_handler = Box::new(YtdlpStderrHandler::default());
                 process.stdout_handler = Some(stdout_handler.clone());
@@ -350,12 +350,12 @@ impl DownloadWorkers {
     }
 }
 
-fn create_download_command(video_id: &VideoId, app_config: &AppConfig) -> anyhow::Result<Command> {
+fn create_download_command(video_id: &VideoId, output_dirpath: &Path, app_config: &AppConfig) -> anyhow::Result<Command> {
     let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
     let ytdlp_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("yt-dlp.exe"))?;
     let ffmpeg_binary_path = app_config.get_absolute_binary_filepath(&PathBuf::from("ffmpeg.exe"))?;
     // Can't canonicalize since path doesn't exist yet
-    let output_filepath = app_config.downloads_folder.join("%(id)s.%(ext)s");
+    let output_filepath = output_dirpath.join("%(id)s.%(ext)s");
     let output_filepath = std::path::absolute(&output_filepath)
         .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
     let mut command = Command::new(ytdlp_binary_path);
