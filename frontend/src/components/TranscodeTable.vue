@@ -100,9 +100,20 @@ const sorted_items = computed(() => {
 </script>
 
 <template>
-<div class="w-full">
-  <TranscodeProgressBar v-if="transcode_state" :state="transcode_state"/>
+<TranscodeProgressBar v-if="transcode_state" :state="transcode_state"/>
+<div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-compact w-full">
+    <colgroup>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-full"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+    </colgroup>
     <thead>
       <tr>
         <th>
@@ -185,5 +196,4 @@ const sorted_items = computed(() => {
     </tbody>
   </table>
 </div>
-
 </template>

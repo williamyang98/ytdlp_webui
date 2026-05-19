@@ -85,9 +85,19 @@ const sorted_items = computed(() => {
 </script>
 
 <template>
-<div class="w-full">
-  <DownloadProgressBar v-if="download_state" :state="download_state"/>
+<DownloadProgressBar v-if="download_state" :state="download_state"/>
+<div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-compact w-full">
+    <colgroup>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-full"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+    </colgroup>
     <thead>
       <tr>
         <th>
