@@ -1,4 +1,3 @@
-use anyhow::Context;
 use serde::{Serialize,Deserialize};
 
 // API schema for github api
@@ -49,23 +48,4 @@ pub struct Asset {
     pub download_count: u64,
 }
 
-pub fn get_github_releases_url(owner: &str, repo: &str, per_page: u32, page: u32) -> String {
-    const URL: &str = "https://api.github.com/repos";
-    format!("{URL}/{owner}/{repo}/releases?per_page={per_page}&page={page}")
-}
 
-pub async fn get_github_releases(owner: &str, repo: &str, per_page: u32, page: u32) -> anyhow::Result<Vec<Release>> {
-    let url = get_github_releases_url(owner, repo, per_page, page);
-    use reqwest::header::{HeaderMap, USER_AGENT};
-    let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, "ytdlp_webui".parse().unwrap());
-    headers.insert("X-GitHub-Api-Version", "2026-03-10".parse().unwrap());
-    let client = reqwest::Client::new();
-    let response = client
-        .get(url)
-        .headers(headers)
-        .send().await?;
-    let data = response.text().await.context("Getting body from response")?;
-    let releases: Vec<Release> = serde_json::from_str(data.as_str()).context("Parsing body into json")?;
-    Ok(releases)
-}
