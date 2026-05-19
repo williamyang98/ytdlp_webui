@@ -250,11 +250,16 @@ impl DownloadWorkers {
                 let stderr_handler = Box::new(YtdlpStderrHandler::default());
                 process.stdout_handler = Some(stdout_handler.clone());
                 process.stderr_handler = Some(stderr_handler.clone());
+                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
+                database
+                    .connect()?
+                    .select_and_update_ytdlp_entry(&video_id, move |entry| {
+                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
+                    })?;
                 if let Err(err) = process.run(command) {
                     return Err(anyhow::anyhow!("Failed to run process: {err:?}"));
                 }
                 // update logging files
-                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
                 let stdout_filepath = app_config.get_relative_data_path(&process.stdout_filename)?;
                 let stderr_filepath = app_config.get_relative_data_path(&process.stderr_filename)?;
                 database
@@ -262,12 +267,12 @@ impl DownloadWorkers {
                     .select_and_update_ytdlp_entry(&video_id, move |entry| {
                         entry.stdout_log_path = Some(stdout_filepath.to_string_lossy().to_string());
                         entry.stderr_log_path = Some(stderr_filepath.to_string_lossy().to_string());
-                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
                     })?;
                 // NOTE: Audio extractor for yt-dlp might not extract anything if the file extension remains the same
                 let download_filepath: Option<String> = stdout_handler.download_path.lock().unwrap().clone();
-                let extract_filepath: Option<String> = stderr_handler.extract_path.lock().unwrap().as_mut()
-                    .and_then(|res| res.as_ref().ok().cloned());
+                let extract_filepath = stderr_handler.extract_path.lock().unwrap()
+                    .take()
+                    .transpose()?;
                 if let Some(filepath) = &download_filepath {
                     log::debug!("Got ytdlp download filepath: {0}", filepath);
                 }

@@ -291,11 +291,16 @@ impl TranscodeWorkers {
                 process.label = Some(format!("transcode_{0}", key.as_str()));
                 let stderr_handler = FfmpegStderrHandler::new(worker.clone());
                 process.stderr_handler = Some(Box::new(stderr_handler));
+                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
+                database
+                    .connect()?
+                    .select_and_update_ffmpeg_entry(&key, move |entry| {
+                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
+                    })?;
                 if let Err(err) = process.run(command) {
                     return Err(anyhow::anyhow!("Failed to run process: {err:?}"));
                 }
                 // update logging files
-                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
                 let stdout_filepath = app_config.get_relative_data_path(&process.stdout_filename)?;
                 let stderr_filepath = app_config.get_relative_data_path(&process.stderr_filename)?;
                 database
@@ -303,7 +308,6 @@ impl TranscodeWorkers {
                     .select_and_update_ffmpeg_entry(&key, move |entry| {
                         entry.stdout_log_path = Some(stdout_filepath.to_string_lossy().to_string());
                         entry.stderr_log_path = Some(stderr_filepath.to_string_lossy().to_string());
-                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
                         entry.audio_path = Some(relative_output_filepath.to_string_lossy().to_string());
                     })?;
                 // validate output file exists
