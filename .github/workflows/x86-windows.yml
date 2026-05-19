@@ -61,7 +61,7 @@ jobs:
 
     - name: Download binaries
       shell: bash
-      run: cargo run --profile ${{env.BUILD_TYPE}} --bin cli
+      run: ./scripts/download_windows.sh
 
     - name: Copy files
       shell: bash

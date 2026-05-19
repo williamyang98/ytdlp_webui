@@ -25,12 +25,10 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 ### Building server
 1. Download and install rust from [https://rust-lang.org/tools/install/](https://rust-lang.org/tools/install/)
 2. Enter the root directory
-3. Build programs: ```cargo build -r```
-4. Download binaries: ```cargo run -r --bin cli```
-5. Download packages using ```./scripts/download_*.sh``` for your platform if required
-6. Copy environment file ```./scripts/.env_*``` for your platform and rename it to ```.env``` in the root folder
-7. Download binaries: ```cargo run -r --bin cli```
-8. Run server: ```cargo run -r --bin server -- --enable-cors```
+3. Download packages using ```./scripts/download_*.sh``` for your platform
+4. Build programs: ```cargo build -r```
+5. Copy environment file ```./scripts/.env_*``` for your platform and rename it to ```.env``` in the root folder
+6. Run server: ```cargo run -r --bin server -- --enable-cors```
 ### Note about cross origin resource sharing (CORS)
 - Passing the argument ```--enable-cors``` when running the server enables cross origin resource sharing
 - This allows for the frontend development server for the website to connect to the backend server

@@ -15,4 +15,3 @@ lazy_static = { workspace = true }
 log = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
-serde = { workspace = true }

@@ -2,6 +2,7 @@ use anyhow::Context;
 use github_api::{DateTimeRfc3339, get_github_releases};
 use clap::Parser;
 use futures_util::StreamExt;
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
@@ -143,7 +144,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     ).await?;
 
 
-    lazy_static::lazy_static! {
+    lazy_static! {
         static ref EXTRA_7ZIP_FILENAME_REGEX: Regex = Regex::new(
             r"7z.*extra.*\.7z"
         ).unwrap();
@@ -158,7 +159,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
         &binaries_folder.join("7z-extra.7z"),
     ).await?;
 
-    lazy_static::lazy_static! {
+    lazy_static! {
         static ref FFMPEG_WIN64_FILENAME_REGEX: Regex = Regex::new(
             r"ffmpeg.*win64.*gpl.*\.zip"
         ).unwrap();
