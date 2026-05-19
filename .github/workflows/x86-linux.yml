@@ -36,6 +36,10 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Copy environment file
+      shell: bash
+      run: cp ./scripts/.env_linux .env
+
     - name: Install packages
       shell: bash
       run: ./scripts/download_ubuntu.sh
@@ -65,9 +69,7 @@ jobs:
 
     - name: Download single video
       shell: bash
-      run: |
-        RUST_LOG=DEBUG
-        cargo run --profile ${{env.BUILD_TYPE}} --bin headless
+      run: RUST_LOG=DEBUG cargo run --profile ${{env.BUILD_TYPE}} --bin headless
 
     - name: Copy files
       shell: bash

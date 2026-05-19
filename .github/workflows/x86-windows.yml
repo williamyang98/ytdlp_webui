@@ -36,6 +36,10 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Copy environment file
+      shell: bash
+      run: cp ./scripts/.env_windows .env
+
     - name: npm install packages
       shell: bash
       working-directory: ./frontend
@@ -65,9 +69,7 @@ jobs:
 
     - name: Download single video
       shell: bash
-      run: |
-        RUST_LOG=DEBUG
-        cargo run --profile ${{env.BUILD_TYPE}} --bin headless
+      run: RUST_LOG=DEBUG cargo run --profile ${{env.BUILD_TYPE}} --bin headless
 
     - name: Copy files
       shell: bash
