@@ -36,6 +36,10 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Install packages
+      shell: bash
+      run: ./scripts/download_ubuntu.sh
+
     - name: npm install packages
       shell: bash
       working-directory: ./frontend
@@ -58,6 +62,12 @@ jobs:
     - name: rust build
       shell: bash
       run: cargo build --profile ${{env.BUILD_TYPE}}
+
+    - name: Download single video
+      shell: bash
+      run: |
+        RUST_LOG=DEBUG
+        cargo run --profile ${{env.BUILD_TYPE}} --bin headless
 
     - name: Copy files
       shell: bash

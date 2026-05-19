@@ -107,9 +107,8 @@ impl App {
         Ok(metadata)
     }
 
-    pub async fn start_transcode(&self, key: &TranscodeKey) -> anyhow::Result<Arc<TranscodeWorker>> {
-        let metadata = self.get_youtube_metadata_from_cache(&key.video_id).await?;
-        self.transcode_workers.start_worker(key, Some(metadata))
+    pub fn start_transcode(&self, key: &TranscodeKey, metadata: Option<Arc<YoutubeMetadata>>) -> anyhow::Result<Arc<TranscodeWorker>> {
+        self.transcode_workers.start_worker(key, metadata)
     }
 
     pub fn start_download(&self, video_id: &VideoId) -> anyhow::Result<Arc<DownloadWorker>> {

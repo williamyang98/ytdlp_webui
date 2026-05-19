@@ -63,6 +63,12 @@ jobs:
       shell: bash
       run: ./scripts/download_windows.sh
 
+    - name: Download single video
+      shell: bash
+      run: |
+        RUST_LOG=DEBUG
+        cargo run --profile ${{env.BUILD_TYPE}} --bin headless
+
     - name: Copy files
       shell: bash
       run: ./scripts/create_package_windows.sh ${{env.PACKAGE_DIR}} ${{env.BUILD_TYPE}}

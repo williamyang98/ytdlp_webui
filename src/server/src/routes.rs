@@ -73,12 +73,16 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
     // download audio file
     let mut response = RequestTranscodeResponse::default();
     response.download_status = app.start_download(&video_id)
-        .with_context(|| "Failed to start download worker")
+        .context("Failed to start download worker")
         .map_err(ApiError::internal_server)?
         .get_status();
+    // download metadata
+    let metadata = app.get_youtube_metadata_from_cache(&video_id).await
+        .context("Failed to get youtube metadata")
+        .map_err(ApiError::internal_server)?;
     // transcode
-    response.transcode_status = app.start_transcode(&transcode_key).await
-        .with_context(|| "Failed to start transcode worker")
+    response.transcode_status = app.start_transcode(&transcode_key, Some(metadata))
+        .context("Failed to start transcode worker")
         .map_err(ApiError::internal_server)?
         .get_status();
     Ok(HttpResponse::Ok().json(response))

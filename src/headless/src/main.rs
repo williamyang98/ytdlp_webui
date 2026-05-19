@@ -8,6 +8,15 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Video id
+    #[arg(default_value = "dQw4w9WgXcQ", value_parser = validate_video_id)]
+    video_id: VideoId,
+    /// Audio extension
+    #[arg(long, default_value = AudioExtension::MP3.as_str(), value_parser = validate_audio_extension)]
+    audio_extension: AudioExtension,
+    /// Download metadata
+    #[arg(long)]
+    download_metadata: bool,
     /// Maximum number of transcode threads
     #[arg(long, default_value_t = 0)]
     total_transcode_threads: usize,
@@ -20,6 +29,14 @@ struct Args {
     /// Environment file
     #[arg(long, default_value = ".env", value_parser = validate_is_file_exists)]
     env_file: PathBuf,
+}
+
+fn validate_video_id(s: &str) -> Result<VideoId, String> {
+    VideoId::try_new(s).map_err(|e| e.to_string())
+}
+
+fn validate_audio_extension(s: &str) -> Result<AudioExtension, String> {
+    AudioExtension::try_from(s).map_err(|e| e.to_string())
 }
 
 fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
@@ -47,27 +64,34 @@ async fn main() -> anyhow::Result<()> {
         0 => std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1),
         x => x,
     };
-
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "INFO");
     }
     env_logger::init();
+    log::info!("Downloading {0}.{1}", args.video_id.as_str(), args.audio_extension.as_str());
 
     let mut app_config = AppConfig::new(&args.env_file, &args.data_folder, &args.static_folder)?;
     app_config.total_transcode_threads = total_transcode_threads;
     let app = App::new(app_config)?;
     let app = Arc::new(app);
-
-    let video_id = VideoId::try_new("ILh0zEfqSQM")?;
     let key = TranscodeKey {
-        video_id: video_id.clone(),
-        audio_ext: AudioExtension::WEBM,
+        video_id: args.video_id.clone(),
+        audio_ext: args.audio_extension,
     };
 
-    let worker = app.start_transcode(&key).await?;
-    log::info!("start_transcode={0:?}", worker.get_status());
-    worker.wait_busy();
-    let state = worker.get_state();
+    let download_worker = app.start_download(&args.video_id)?;
+    log::info!("download_worker: status={0:?}", download_worker.get_status());
+    let metadata = if args.download_metadata {
+        let metadata = app.get_youtube_metadata_from_cache(&args.video_id).await?;
+        log::info!("youtube_metadata: title={0:?}", metadata.items.first().map(|e| e.snippet.title.as_str()));
+        Some(metadata)
+    } else {
+        None
+    };
+    let transcode_worker = app.start_transcode(&key, metadata)?;
+    log::info!("start_transcode: status={0:?}", transcode_worker.get_status());
+    transcode_worker.wait_busy();
+    let state = transcode_worker.get_state();
     log::info!("transcode_state={state:?}");
 
 
