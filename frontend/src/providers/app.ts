@@ -3,6 +3,7 @@ import {
   type YtdlpRow, type FfmpegRow,
   type VideoId, type DownloadKey, type TranscodeKey,
   type TranscodeState, type DownloadState,
+  type AudioExtension,
   is_worker_running,
 } from "../api/ytdlp_api_schema.ts";
 import { type Metadata } from "../api/youtube_api_schema.ts";
@@ -110,6 +111,11 @@ function get_transcode_worker_key(key: TranscodeKey): string {
   return `${key.video_id}_${key.audio_ext}`;
 }
 
+export interface SearchBar {
+  url: string;
+  audio_ext: AudioExtension;
+}
+
 export class App {
   downloads: YtdlpRow[];
   transcodes: FfmpegRow[];
@@ -119,6 +125,7 @@ export class App {
   metadata: Metadata | null;
   download_workers: Partial<Record<string, DownloadWorker>>;
   transcode_workers: Partial<Record<string, TranscodeWorker>>;
+  search_bar: SearchBar;
 
   constructor() {
     this.downloads = [];
@@ -129,6 +136,10 @@ export class App {
     this.metadata = null;
     this.transcode_workers = {};
     this.download_workers = {};
+    this.search_bar = {
+      url: "",
+      audio_ext: "mp3",
+    };
   }
 
   async get_downloads() {
@@ -168,11 +179,14 @@ export class App {
 
   select_download(key: DownloadKey) {
     this.selected_download_key = key;
+    this.search_bar.url = key;
     const _ = this.get_metadata(key);
   }
 
   select_transcode(key: TranscodeKey) {
     this.selected_transcode_key = key;
+    this.search_bar.url = key.video_id;
+    this.search_bar.audio_ext = key.audio_ext;
     const _ = this.get_metadata(key.video_id);
   }
 
