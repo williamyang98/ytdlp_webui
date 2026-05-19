@@ -177,7 +177,6 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
 async fn extract_files(binaries_folder: &Path) -> anyhow::Result<()> {
     use std::process::Command;
     let zip_minimal_executable_path = binaries_folder.join("7zr.exe")
