@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { get_youtube_link } from "../api/api.ts";
-import { convert_dhms_to_string } from "../utility/format.ts";
-import { providers } from "../providers/providers.ts";
+import { type Metadata } from "../api/youtube_api_schema.ts";
+import { convert_dhms_to_string, format_date } from "../utility/format.ts";
 
-const app = providers.app;
+const props = defineProps<{
+  metadata: Metadata,
+}>();
 
 const item = computed(() => {
-  if (app.metadata === null) return null;
-  const item = app.metadata.items.at(0);
+  const item = props.metadata.items.at(0);
   if (item === undefined) return null;
   return item;
 });
@@ -37,36 +38,40 @@ const youtube_link = computed(() => {
 </script>
 
 <template>
-<table v-if="item" class="table table-pin-rows table-compact" :class="$attrs.class">
-  <tbody>
-    <tr>
-      <td class="font-medium text-nowrap">Title</td>
-      <td>{{ item.snippet.title }}</td>
-    </tr>
-    <tr>
-      <td class="font-medium text-nowrap">Duration</td>
-      <td>{{ convert_dhms_to_string(item.contentDetails.duration) }}</td>
-    </tr>
-    <tr>
-      <td class="font-medium text-nowrap">Channel</td>
-      <td>{{ item.snippet.channelTitle }}</td>
-    </tr>
-    <tr>
-      <td class="font-medium text-nowrap">Video</td>
-      <td><a v-if="youtube_link" class="link link-primary" :href="youtube_link">{{ youtube_link }}</a></td>
-    </tr>
-    <tr v-if="thumbnail_link">
-      <td class="font-medium text-nowrap">Thumbnail</td>
-      <td><img :src="thumbnail_link.url" style="max-height: 200px"></td>
-    </tr>
-    <tr>
-      <td class="font-medium text-nowrap">Description</td>
-      <td>
-        <div class="w-full max-h-50 overflow-auto">
-          {{ item.snippet.description }}
-        </div>
-      </td>
-    </tr>
-  </tbody>
-</table>
+<div v-if="item !== null" class="w-full">
+  <table class="table table-pin-rows table-compact">
+    <colgroup>
+      <col class="w-px"/>
+    </colgroup>
+    <tbody>
+      <tr>
+        <td class="font-medium text-nowrap">Title</td>
+        <td>{{ item.snippet.title }}</td>
+      </tr>
+      <tr>
+        <td class="font-medium text-nowrap">Duration</td>
+        <td>{{ convert_dhms_to_string(item.contentDetails.duration) }}</td>
+      </tr>
+      <tr>
+        <td class="font-medium text-nowrap">Uploaded</td>
+        <td>{{ format_date(item.snippet.publishedAt) }}</td>
+      </tr>
+      <tr>
+        <td class="font-medium text-nowrap">Channel</td>
+        <td>{{ item.snippet.channelTitle }}</td>
+      </tr>
+      <tr>
+        <td class="font-medium text-nowrap">Video</td>
+        <td><a v-if="youtube_link" class="link link-primary" :href="youtube_link">{{ youtube_link }}</a></td>
+      </tr>
+    </tbody>
+  </table>
+  <div v-if="thumbnail_link !== null" class="max-w-full">
+    <img :src="thumbnail_link.url" class="w-full max-w-lg"/>
+  </div>
+  <div class="w-full max-h-100 overflow-y-auto overflow-x-hidden">
+    <span class="font-medium text-nowrap">Description</span>
+    <p class="text-sm">{{ item.snippet.description }}</p>
+  </div>
+</div>
 </template>

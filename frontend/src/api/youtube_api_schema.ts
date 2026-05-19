@@ -16,7 +16,7 @@ const ContentDetailsSchema = z.object({
 });
 
 const SnippetSchema = z.object({
-  publishedAt: z.string(),
+  publishedAt: z.iso.datetime().transform(s => new Date(s)),
   channelId: z.string(),
   title: z.string(),
   description: z.string(),

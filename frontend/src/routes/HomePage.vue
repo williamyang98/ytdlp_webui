@@ -17,6 +17,6 @@ const app = providers.app;
 </div>
 <div v-if="app.metadata !== null" class="w-full">
   <div class="divider my-1"></div>
-  <MetadataTable/>
+  <MetadataTable :metadata="app.metadata"/>
 </div>
 </template>

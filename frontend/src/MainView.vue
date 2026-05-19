@@ -72,7 +72,7 @@ watch(() => current_route.name, (name) => {
     </div>
   </div>
   <!-- Body -->
-  <div class="p-1 flex-1 w-full overflow-auto">
+  <div class="p-1 flex-1 w-full overflow-y-auto overflow-x-hidden">
     <RouterView/>
   </div>
 </div>
