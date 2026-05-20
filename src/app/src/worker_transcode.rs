@@ -4,7 +4,7 @@ use crate::ffmpeg;
 use crate::util::get_unix_time;
 use crate::worker_download::DownloadWorkers;
 use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
-use crate::youtube_metadata::YoutubeMetadata;
+use youtube_api::YoutubeMetadata;
 use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;

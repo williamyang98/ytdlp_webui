@@ -16,3 +16,4 @@ log = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
+youtube_api = { path = "../youtube_api" }

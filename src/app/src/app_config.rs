@@ -1,6 +1,5 @@
 use anyhow::Context;
 use std::path::{Path, PathBuf};
-use crate::youtube_metadata::{YoutubeApiKey, validate_youtube_api_key};
 
 #[derive(Clone,Debug)]
 pub struct AppConfig {
@@ -12,17 +11,12 @@ pub struct AppConfig {
     pub metadata_folder: PathBuf,
     pub database_path: PathBuf,
     pub total_transcode_threads: usize,
-    pub youtube_api_key: YoutubeApiKey,
     pub ffmpeg_command: PathBuf,
     pub ytdlp_command: PathBuf,
 }
 
-fn get_environment_variable(key: &'static str) -> anyhow::Result<String> {
-    std::env::var(key).context(format!("Missing {0}", key))
-}
-
 fn get_command_from_environment_variable(key: &'static str) -> anyhow::Result<PathBuf> {
-    let command = get_environment_variable(key)?;
+    let command = std::env::var(key).context(format!("Missing {0}", key))?;
     if command.is_empty() {
         return Err(anyhow::anyhow!("Got empty command string for environment variable {0}", key));
     }
@@ -35,9 +29,6 @@ impl AppConfig {
     pub fn new(env_file: &Path, data_folder: &Path, static_folder: &Path) -> anyhow::Result<Self> {
         dotenvy::from_path(env_file)
             .with_context(|| anyhow::anyhow!("Failed to read dotenv file at: {0}", env_file.to_string_lossy()))?;
-
-        let youtube_api_key = get_environment_variable("YOUTUBE_API_KEY")?;
-        let youtube_api_key = validate_youtube_api_key(&youtube_api_key)?;
 
         let ffmpeg_command = get_command_from_environment_variable("FFMPEG_BIN")?;
         log::debug!("Got ffmpeg command: {0}", &ffmpeg_command.to_string_lossy());
@@ -89,7 +80,6 @@ impl AppConfig {
             transcodes_folder,
             metadata_folder,
             database_path,
-            youtube_api_key,
             ffmpeg_command,
             ytdlp_command,
             total_transcode_threads: 8,

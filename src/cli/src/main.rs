@@ -1,5 +1,5 @@
 use anyhow::Context;
-use github_api::{DateTimeRfc3339, get_github_releases};
+use github_api::{GithubApi, DateTimeRfc3339};
 use clap::Parser;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
@@ -56,10 +56,10 @@ pub struct TaggedAsset {
     pub filename: TaggedFilename,
 }
 
-async fn get_tagged_release(file: &TaggedAsset) -> anyhow::Result<Vec<TaggedRelease>> {
+async fn get_tagged_release(api: &GithubApi, file: &TaggedAsset) -> anyhow::Result<Vec<TaggedRelease>> {
     let total_per_page = 10;
     let page = 1;
-    let github_releases = get_github_releases(&file.owner, &file.repo, total_per_page, page).await?;
+    let github_releases = api.get_releases(&file.owner, &file.repo, total_per_page, page).await?;
     let mut releases: Vec<TaggedRelease> = vec![];
     for github_release in &github_releases {
         for asset in &github_release.assets {
@@ -81,8 +81,8 @@ async fn get_tagged_release(file: &TaggedAsset) -> anyhow::Result<Vec<TaggedRele
     Ok(releases)
 }
 
-async fn download_file(tagged_asset: &TaggedAsset, output_path: &Path) -> anyhow::Result<()> {
-    let releases = get_tagged_release(tagged_asset).await?;
+async fn download_file(api: &GithubApi, tagged_asset: &TaggedAsset, output_path: &Path) -> anyhow::Result<()> {
+    let releases = get_tagged_release(api, tagged_asset).await?;
     let release = releases.first().ok_or(anyhow::anyhow!("No releases available"))?;
     log::info!("Selected release: tag='{0}' name='{1}'", &release.tag_name, &release.asset_name);
 
@@ -124,8 +124,9 @@ async fn download_file(tagged_asset: &TaggedAsset, output_path: &Path) -> anyhow
     Ok(())
 }
 
-async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
+async fn download_files(api: &GithubApi, binaries_folder: &Path) -> anyhow::Result<()> {
     download_file(
+        api,
         &TaggedAsset {
             owner: "yt-dlp".to_owned(),
             repo: "yt-dlp".to_owned(),
@@ -135,6 +136,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     ).await?;
 
     download_file(
+        api,
         &TaggedAsset {
             owner: "ip7z".to_owned(),
             repo: "7zip".to_owned(),
@@ -151,6 +153,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
     }
 
     download_file(
+        api,
         &TaggedAsset {
             owner: "ip7z".to_owned(),
             repo: "7zip".to_owned(),
@@ -167,6 +170,7 @@ async fn download_files(binaries_folder: &Path) -> anyhow::Result<()> {
 
     // https://www.ffmpeg.org/download.html#build-windows
     download_file(
+        api,
         &TaggedAsset {
             owner: "BtbN".to_owned(),
             repo: "FFmpeg-Builds".to_owned(),
@@ -235,7 +239,8 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.binaries_folder)
         .context("Failed to open binaries folder")?;
 
-    download_files(&args.binaries_folder).await?;
+    let api = GithubApi::default();
+    download_files(&api, &args.binaries_folder).await?;
     extract_files(&args.binaries_folder).await?;
 
     Ok(())

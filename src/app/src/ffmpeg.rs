@@ -2,7 +2,8 @@ use std::path::Path;
 use lazy_static::lazy_static;
 use regex::Regex;
 use thiserror::Error;
-use crate::{database::{AudioExtension, VideoId}, youtube_metadata::{Thumbnail, YoutubeMetadata}};
+use crate::database::AudioExtension;
+use youtube_api::{Thumbnail, YoutubeVideoId, YoutubeMetadata};
 
 #[derive(Clone,Copy,Debug)]
 enum SizeBytes {
@@ -229,7 +230,7 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
 
 pub fn create_ffmpeg_transcode_arguments(
     input_path: &Path, output_path: &Path,
-    video_id: &VideoId, audio_ext: AudioExtension,
+    video_id: &YoutubeVideoId, audio_ext: AudioExtension,
     metadata: Option<&YoutubeMetadata>,
 ) -> Vec<String> {
     // spawn process
@@ -265,7 +266,7 @@ pub fn create_ffmpeg_transcode_arguments(
             push_metadata(&mut args, "title", item.snippet.title.as_str());
             push_metadata(&mut args, "artist", item.snippet.channel_title.as_str());
             push_metadata(&mut args, "description", item.snippet.description.as_str());
-            push_metadata(&mut args, "published_at", item.snippet.published_at.as_str());
+            push_metadata(&mut args, "published_at", serde_json::to_string(&item.snippet.published_at).unwrap().as_str());
             push_args(&mut args, &["-id3v2_version", "3"]);
             let mut thumbnails: Vec<(&String, &Thumbnail)> = item.snippet.thumbnails.iter().collect();
             thumbnails.sort_by_key(|(_, thumbnail)| thumbnail.width * thumbnail.height);

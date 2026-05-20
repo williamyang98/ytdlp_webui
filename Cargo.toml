@@ -10,7 +10,7 @@ anyhow = { version = "1.0.102" }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 clap = { version = "4.5.4", features = ["derive"] }
 dashmap = { version = "6.0.1" }
-derive_more = { version = "2.1.1", features = ["from", "debug"] }
+derive_more = { version = "2.1.1", features = ["as_ref", "debug", "display", "from", "into"] }
 diesel = { version = "2.3.9", features = ["sqlite", "r2d2"] }
 diesel_migrations = { version = "2.3.2" }
 dotenvy = { version = "0.15.7" }
@@ -28,6 +28,7 @@ regex = { version = "1.10.5" }
 reqwest = { version = "0.12.5", features = ["stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
+test-log = { version = "0.2.20" }
 thiserror = { version = "1.0.63" }
 threadpool = { version = "1.8.1" }
 time = { version = "0.3.47", features = ["serde", "parsing", "formatting"] }

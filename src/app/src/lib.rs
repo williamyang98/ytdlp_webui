@@ -7,5 +7,4 @@ pub mod util;
 pub mod worker_download;
 pub mod worker_process;
 pub mod worker_transcode;
-pub mod youtube_metadata;
 pub mod ytdlp;

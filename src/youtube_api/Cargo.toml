@@ -1,0 +1,23 @@
+[package]
+name = "youtube_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+derive_more = { workspace = true }
+diesel = { workspace = true, optional = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+actix-web = { workspace = true }
+
+[features]
+diesel = ["dep:diesel"]

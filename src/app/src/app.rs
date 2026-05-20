@@ -1,15 +1,17 @@
 use crate::app_config::AppConfig;
-use crate::database::{Database, FfmpegRow, TranscodeKey, VideoId, YtdlpRow};
+use crate::database::{Database, FfmpegRow, TranscodeKey, YtdlpRow};
 use crate::util::defer;
 use crate::worker_download::{DownloadWorker, DownloadWorkers};
 use crate::worker_transcode::{TranscodeWorker, TranscodeWorkers};
-use crate::youtube_metadata::{YoutubeMetadata, YoutubeMetadataCache, get_youtube_metadata};
 use dashmap::DashMap;
 use serde::Serialize;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use threadpool::ThreadPool;
+use youtube_api::{YoutubeApi, YoutubeMetadata, YoutubeVideoId};
+
+pub type YoutubeMetadataCache = Arc<DashMap<YoutubeVideoId, Arc<YoutubeMetadata>>>;
 
 #[derive(Clone)]
 pub struct App {
@@ -19,6 +21,7 @@ pub struct App {
     transcode_workers: Arc<TranscodeWorkers>,
     download_workers: Arc<DownloadWorkers>,
     metadata_cache: YoutubeMetadataCache,
+    youtube_api: YoutubeApi,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,7 +48,8 @@ impl App {
         let threadpool = Arc::new(ThreadPool::new(app_config.total_transcode_threads));
         let download_workers = Arc::new(DownloadWorkers::new(database.clone(), threadpool.clone(), app_config.clone()));
         let transcode_workers = Arc::new(TranscodeWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), download_workers.clone()));
-        let metadata_cache: YoutubeMetadataCache = Arc::new(DashMap::<VideoId, Arc<YoutubeMetadata>>::new());
+        let metadata_cache: YoutubeMetadataCache = Arc::new(DashMap::<YoutubeVideoId, Arc<YoutubeMetadata>>::new());
+        let youtube_api = YoutubeApi::default();
         Ok(Self {
             app_config,
             database,
@@ -53,10 +57,11 @@ impl App {
             download_workers,
             transcode_workers,
             metadata_cache,
+            youtube_api,
         })
     }
 
-    pub async fn get_youtube_metadata_from_cache(&self, video_id: &VideoId) -> anyhow::Result<Arc<YoutubeMetadata>> {
+    pub async fn get_youtube_metadata_from_cache(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Arc<YoutubeMetadata>> {
         if let Some(metadata) = self.metadata_cache.get(video_id) {
             return Ok(metadata.clone());
         }
@@ -93,7 +98,7 @@ impl App {
         let metadata = match metadata {
             Some(metadata) => metadata,
             None => {
-                let metadata = get_youtube_metadata(video_id, &self.app_config.youtube_api_key).await?;
+                let metadata = self.youtube_api.get_video_metadata(video_id).await?;
                 if let Err(err) = write_to_filepath(&filepath, &metadata) {
                     log::error!("Failed to cache metadata to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
                 } else {
@@ -111,7 +116,7 @@ impl App {
         self.transcode_workers.start_worker(key, metadata)
     }
 
-    pub fn start_download(&self, video_id: &VideoId) -> anyhow::Result<Arc<DownloadWorker>> {
+    pub fn start_download(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Arc<DownloadWorker>> {
         self.download_workers.start_worker(video_id)
     }
 
@@ -153,7 +158,7 @@ impl App {
         deleted_results
     }
 
-    pub fn delete_download(&self, video_id: &VideoId) -> anyhow::Result<Option<DeleteResponse>> {
+    pub fn delete_download(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Option<DeleteResponse>> {
         if let Some(worker) = self.download_workers.get_worker(video_id) {
             if worker.get_status().is_busy() {
                 return Ok(Some(DeleteResponse::Busy));
@@ -227,7 +232,7 @@ impl App {
         Ok(entries)
     }
 
-    pub fn get_download(&self, video_id: &VideoId) -> anyhow::Result<Option<YtdlpRow>> {
+    pub fn get_download(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Option<YtdlpRow>> {
         let entry = self.database
             .connect()?
             .select_ytdlp_entry(video_id)?;
@@ -241,7 +246,7 @@ impl App {
         Ok(entry)
     }
 
-    pub fn get_download_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
+    pub fn get_download_worker(&self, video_id: &YoutubeVideoId) -> Option<Arc<DownloadWorker>> {
         self.download_workers.get_worker(video_id)
     }
 

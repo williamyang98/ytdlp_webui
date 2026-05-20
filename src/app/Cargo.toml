@@ -26,3 +26,4 @@ thiserror = { workspace = true }
 threadpool = { workspace = true }
 time = { workspace = true }
 which = { workspace = true }
+youtube_api = { path = "../youtube_api", features = ["diesel"] }

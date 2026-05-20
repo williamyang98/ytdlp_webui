@@ -1,16 +1,17 @@
-use app::database::{AudioExtension, VideoId, TranscodeKey};
+use app::database::{AudioExtension, TranscodeKey};
 use std::sync::Arc;
 use app::app::App;
 use app::app_config::AppConfig;
 use clap::Parser;
 use std::path::PathBuf;
+use youtube_api::{YoutubeVideoId, YoutubeVideoIdError};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Video id
     #[arg(default_value = "dQw4w9WgXcQ", value_parser = validate_video_id)]
-    video_id: VideoId,
+    video_id: YoutubeVideoId,
     /// Audio extension
     #[arg(long, default_value = AudioExtension::MP3.as_str(), value_parser = validate_audio_extension)]
     audio_extension: AudioExtension,
@@ -31,8 +32,8 @@ struct Args {
     env_file: PathBuf,
 }
 
-fn validate_video_id(s: &str) -> Result<VideoId, String> {
-    VideoId::try_new(s).map_err(|e| e.to_string())
+fn validate_video_id(s: &str) -> Result<YoutubeVideoId, String> {
+    s.try_into().map_err(|e: YoutubeVideoIdError| e.to_string())
 }
 
 fn validate_audio_extension(s: &str) -> Result<AudioExtension, String> {
