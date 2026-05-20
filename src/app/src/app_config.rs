@@ -8,7 +8,7 @@ pub struct AppConfig {
     pub static_folder: PathBuf,
     pub downloads_folder: PathBuf,
     pub transcodes_folder: PathBuf,
-    pub metadata_folder: PathBuf,
+    pub youtube_api_cache_folder: PathBuf,
     pub database_path: PathBuf,
     pub total_transcode_threads: usize,
     pub ffmpeg_command: PathBuf,
@@ -47,7 +47,7 @@ impl AppConfig {
 
         let downloads_folder = data_folder.join("downloads");
         let transcodes_folder = data_folder.join("transcodes");
-        let metadata_folder = data_folder.join("metadata");
+        let youtube_api_cache_folder = data_folder.join("youtube_api_cache");
         let database_path = data_folder.join("index.db");
         let current_working_directory = std::env::current_dir()
             .context("Couldn't get current working directory of process")?;
@@ -60,7 +60,7 @@ impl AppConfig {
         create_folder(&data_folder)?;
         create_folder(&downloads_folder)?;
         create_folder(&transcodes_folder)?;
-        create_folder(&metadata_folder)?;
+        create_folder(&youtube_api_cache_folder)?;
 
         if !static_folder.exists() {
             return Err(anyhow::anyhow!("Static dirpath doesn't exist: {0}", static_folder.to_string_lossy()));
@@ -78,7 +78,7 @@ impl AppConfig {
             static_folder,
             downloads_folder,
             transcodes_folder,
-            metadata_folder,
+            youtube_api_cache_folder,
             database_path,
             ffmpeg_command,
             ytdlp_command,
@@ -112,7 +112,7 @@ impl AppConfig {
     pub fn check_if_path_whitelisted_for_delete(&self, absolute_path: &Path) -> bool {
         if absolute_path.starts_with(&self.downloads_folder) { return true; }
         if absolute_path.starts_with(&self.transcodes_folder) { return true; }
-        if absolute_path.starts_with(&self.metadata_folder) { return true; }
+        if absolute_path.starts_with(&self.youtube_api_cache_folder) { return true; }
         false
     }
 

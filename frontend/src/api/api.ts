@@ -105,7 +105,7 @@ export async function get_transcode_state(key: TranscodeKey): Promise<TranscodeS
 }
 
 export async function get_metadata(key: DownloadKey): Promise<YoutubeMetadata> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/get_metadata/${key}`);
+  const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/video/${key}`);
   if (!response.ok) await handle_bad_response(response);
   const json = await response.json();
   const state = YoutubeMetadataSchema.parse(json);

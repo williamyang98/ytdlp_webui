@@ -4,7 +4,7 @@ use crate::ffmpeg;
 use crate::util::get_unix_time;
 use crate::worker_download::DownloadWorkers;
 use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
-use youtube_api::YoutubeMetadata;
+use youtube_api::{PaginatedResponse, VideoItem};
 use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
@@ -195,7 +195,7 @@ impl TranscodeWorkers {
         self.cache.remove(key).map(|(_key, value)| value)
     }
 
-    pub fn start_worker(&self, key: &TranscodeKey, metadata: Option<Arc<YoutubeMetadata>>) -> anyhow::Result<Arc<TranscodeWorker>> {
+    pub fn start_worker(&self, key: &TranscodeKey, video_info: Option<Arc<PaginatedResponse<VideoItem>>>) -> anyhow::Result<Arc<TranscodeWorker>> {
         // check cache hit
         if let Some(worker) = self.cache.get(key) {
             let state = worker.state.lock().unwrap();
@@ -243,7 +243,7 @@ impl TranscodeWorkers {
             let threadpool = self.threadpool.clone();
             let download_workers = self.download_workers.clone();
             let worker = worker.clone();
-            let metadata = metadata.clone();
+            let video_info = video_info.clone();
             move || -> anyhow::Result<()> {
                 let download_worker = download_workers.start_worker(&key.video_id)
                     .context(format!("Failed to start download worker while starting transcode worker: {0}", key.as_str()))?;
@@ -287,7 +287,7 @@ impl TranscodeWorkers {
                     .with_context(|| format!("Failed to get relative output filepath from: {0}", output_filepath.to_string_lossy()))?;
                 // setup process
                 let mut process = ProcessWorker::new(threadpool.clone(), &output_dirpath);
-                let command = create_transcode_command(&key, &input_filepath, &output_filepath, metadata.as_deref(), &app_config)?;
+                let command = create_transcode_command(&key, &input_filepath, &output_filepath, video_info.as_deref(), &app_config)?;
                 process.label = Some(format!("transcode_{0}", key.as_str()));
                 let stderr_handler = FfmpegStderrHandler::new(worker.clone());
                 process.stderr_handler = Some(Box::new(stderr_handler));
@@ -363,11 +363,11 @@ fn create_transcode_command(
     key: &TranscodeKey,
     input_path: &Path,
     output_path: &Path,
-    metadata: Option<&YoutubeMetadata>,
+    video_info: Option<&PaginatedResponse<VideoItem>>,
     app_config: &AppConfig,
 ) -> anyhow::Result<Command> {
     let mut command = Command::new(&app_config.ffmpeg_command);
-    let args = ffmpeg::create_ffmpeg_transcode_arguments(input_path, output_path, &key.video_id, key.audio_ext, metadata);
+    let args = ffmpeg::create_ffmpeg_transcode_arguments(input_path, output_path, &key.video_id, key.audio_ext, video_info);
     command.current_dir(&app_config.current_working_directory);
     command.args(args.as_slice());
     Ok(command)

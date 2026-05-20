@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
 use threadpool::ThreadPool;
-use youtube_api::YoutubeVideoId;
+use youtube_api::VideoId;
 
 #[derive(Clone,Debug,Serialize)]
 pub struct DownloadState {
@@ -64,13 +64,13 @@ impl DownloadState {
 }
 
 pub struct DownloadWorker {
-    video_id: YoutubeVideoId,
+    video_id: VideoId,
     state: Mutex<Box<DownloadState>>,
     condvar: Condvar,
 }
 
 impl DownloadWorker {
-    fn new(video_id: YoutubeVideoId) -> Self {
+    fn new(video_id: VideoId) -> Self {
         Self {
             video_id,
             state: Mutex::new(Box::new(DownloadState::default())),
@@ -173,7 +173,7 @@ pub struct DownloadWorkers {
     database: Arc<Database>,
     threadpool: Arc<ThreadPool>,
     app_config: Arc<AppConfig>,
-    cache: DashMap<YoutubeVideoId, Arc<DownloadWorker>>,
+    cache: DashMap<VideoId, Arc<DownloadWorker>>,
 }
 
 impl DownloadWorkers {
@@ -186,15 +186,15 @@ impl DownloadWorkers {
         }
     }
 
-    pub fn get_worker(&self, video_id: &YoutubeVideoId) -> Option<Arc<DownloadWorker>> {
+    pub fn get_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
         self.cache.get(video_id).as_deref().cloned()
     }
 
-    pub fn delete_worker(&self, video_id: &YoutubeVideoId) -> Option<Arc<DownloadWorker>> {
+    pub fn delete_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
         self.cache.remove(video_id).map(|(_key, value)| value)
     }
 
-    pub fn start_worker(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Arc<DownloadWorker>> {
+    pub fn start_worker(&self, video_id: &VideoId) -> anyhow::Result<Arc<DownloadWorker>> {
         // check cache hit
         if let Some(worker) = self.cache.get(video_id) {
             let state = worker.state.lock().unwrap();
@@ -356,7 +356,7 @@ impl DownloadWorkers {
     }
 }
 
-fn create_download_command(video_id: &YoutubeVideoId, output_dirpath: &Path, app_config: &AppConfig) -> anyhow::Result<Command> {
+fn create_download_command(video_id: &VideoId, output_dirpath: &Path, app_config: &AppConfig) -> anyhow::Result<Command> {
     let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
     // Can't canonicalize since path doesn't exist yet
     let output_filepath = output_dirpath.join("%(id)s.%(ext)s");

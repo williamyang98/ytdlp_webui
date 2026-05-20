@@ -1,7 +1,5 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
-use lazy_static::lazy_static;
-use regex::Regex;
 use derive_more::{AsRef, Display, Into};
 use thiserror::Error;
 
@@ -14,34 +12,38 @@ use diesel::{
     sql_types::Text,
 };
 
+// https://www.rfc-editor.org/rfc/rfc3339.html
+// RFC3339 is a stricter profile for ISO8601
 #[derive(Debug,Clone,Serialize,Deserialize)]
 #[serde(transparent)]
 pub struct DateTimeRfc3339(#[serde(with = "time::serde::rfc3339")] pub time::OffsetDateTime);
 
-#[derive(Clone,Debug,Display,PartialEq,Eq,Hash,Serialize,AsRef,Into)]
+// Video items
+// https://developers.google.com/youtube/v3/docs/videos/list
+#[derive(Clone,Debug,Display,PartialEq,Eq,Hash,Serialize,Deserialize,AsRef,Into)]
 #[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow))]
 #[cfg_attr(feature = "diesel", diesel(sql_type = Text))]
 #[serde(transparent)]
-pub struct YoutubeVideoId(String);
+pub struct VideoId(String);
 
-impl YoutubeVideoId {
+impl VideoId {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
 
 #[derive(Clone,Copy,Debug,Error,Serialize)]
-pub enum YoutubeVideoIdError {
+pub enum VideoIdError {
     #[error("Invalid length: expected={expected}, given={given}")]
     InvalidLength { expected: usize, given: usize },
     #[error("Invalid character: index={index}, char={char}")]
     InvalidCharacter { index: usize, char: char },
 }
 
-impl TryInto<YoutubeVideoId> for &str {
-    type Error = YoutubeVideoIdError;
+impl TryInto<VideoId> for &str {
+    type Error = VideoIdError;
 
-    fn try_into(self) -> Result<YoutubeVideoId, Self::Error> {
+    fn try_into(self) -> Result<VideoId, Self::Error> {
         const VALID_YOUTUBE_ID_LENGTH: usize = 11;
         if self.len() != VALID_YOUTUBE_ID_LENGTH {
             return Err(Self::Error::InvalidLength { expected: VALID_YOUTUBE_ID_LENGTH, given: self.len() });
@@ -50,12 +52,12 @@ impl TryInto<YoutubeVideoId> for &str {
         if let Some((index, c)) = invalid_char {
             return Err(Self::Error::InvalidCharacter { index, char: c });
         }
-        Ok(YoutubeVideoId(self.to_owned()))
+        Ok(VideoId(self.to_owned()))
     }
 }
 
 #[cfg(feature = "diesel")]
-impl<DB> ToSql<Text, DB> for YoutubeVideoId where DB: Backend, str: ToSql<Text, DB> {
+impl<DB> ToSql<Text, DB> for VideoId where DB: Backend, str: ToSql<Text, DB> {
     fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, DB>) -> diesel::serialize::Result {
         let value: &str = self.as_ref();
         value.to_sql(out)
@@ -63,31 +65,13 @@ impl<DB> ToSql<Text, DB> for YoutubeVideoId where DB: Backend, str: ToSql<Text, 
 }
 
 #[cfg(feature = "diesel")]
-impl<DB> FromSql<Text, DB> for YoutubeVideoId where DB: Backend, *const str: FromSql<Text, DB> {
+impl<DB> FromSql<Text, DB> for VideoId where DB: Backend, *const str: FromSql<Text, DB> {
     fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         type A = *const str;
         let text = A::from_sql(bytes)?;
         let text = unsafe { &*text };
-        let id: YoutubeVideoId = text.try_into()?;
+        let id: VideoId = text.try_into()?;
         Ok(id)
-    }
-}
-
-
-#[derive(Clone,Debug,Display,AsRef,Into)]
-pub struct YoutubeApiKey(String);
-
-impl TryInto<YoutubeApiKey> for &str {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<YoutubeApiKey, Self::Error> {
-        lazy_static! {
-            static ref YOUTUBE_API_KEY_REGEX: Regex = Regex::new(r"^[a-zA-Z0-9\\.\-\_]{24,}$").unwrap();
-        }
-        if !YOUTUBE_API_KEY_REGEX.is_match(self) {
-            return Err(anyhow::anyhow!("Invalid youtube api key: {0}", self));
-        }
-        Ok(YoutubeApiKey(self.to_owned()))
     }
 }
 
@@ -99,58 +83,155 @@ pub struct Thumbnail {
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
-pub struct ContentDetails {
+#[serde(rename_all = "camelCase")]
+pub struct VideoContentDetailsPart {
     pub duration: String,
     pub dimension: String,
     pub definition: String,
     pub caption: String,
-    #[serde(rename="licensedContent")]
     pub licensed_content: bool,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
-pub struct Snippet {
-    #[serde(rename="publishedAt")]
+#[serde(rename_all = "camelCase")]
+pub struct VideoSnippetPart {
     pub published_at: DateTimeRfc3339,
-    #[serde(rename="channelId")]
     pub channel_id: String,
     pub title: String,
     pub description: String,
     #[serde(default)]
     pub thumbnails: HashMap<String, Thumbnail>,
-    #[serde(rename="channelTitle")]
     pub channel_title: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(rename="categoryId")]
     pub category_id: String,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
-pub struct Item {
-    pub id: String,
+#[serde(rename_all = "camelCase")]
+pub struct VideoItem {
+    pub id: VideoId,
     pub etag: String,
     pub kind: String,
-    pub snippet: Snippet,
-    #[serde(rename="contentDetails")]
-    pub content_details: ContentDetails,
+    pub snippet: VideoSnippetPart,
+    pub content_details: VideoContentDetailsPart,
+}
+
+// Playlist Items
+// https://developers.google.com/youtube/v3/docs/playlistItems/list
+#[derive(Clone,Debug,Display,PartialEq,Eq,Hash,Serialize,Deserialize,AsRef,Into)]
+#[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow))]
+#[cfg_attr(feature = "diesel", diesel(sql_type = Text))]
+#[serde(transparent)]
+pub struct PlaylistId(String);
+
+impl PlaylistId {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+#[derive(Clone,Copy,Debug,Error,Serialize)]
+pub enum PlaylistIdError {
+    #[error("Id too short: minimum={minimum}, given={given}")]
+    TooShort { minimum: usize, given: usize },
+    #[error("Invalid character: index={index}, char={char}")]
+    InvalidCharacter { index: usize, char: char },
+}
+
+impl TryInto<PlaylistId> for &str {
+    type Error = PlaylistIdError;
+
+    fn try_into(self) -> Result<PlaylistId, Self::Error> {
+        const MINIMUM_LENGTH: usize = 11;
+        if self.len() < MINIMUM_LENGTH {
+            return Err(Self::Error::TooShort { minimum: MINIMUM_LENGTH, given: self.len() });
+        }
+        let invalid_char = self.chars().enumerate().find(|(_,c)| !matches!(c, 'A'..='Z'|'a'..='z'|'0'..='9'|'-'|'_'));
+        if let Some((index, c)) = invalid_char {
+            return Err(Self::Error::InvalidCharacter { index, char: c });
+        }
+        Ok(PlaylistId(self.to_owned()))
+    }
+}
+
+#[derive(Clone,Debug,Display,PartialEq,Eq,Hash,Serialize,Deserialize,AsRef,Into)]
+#[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow))]
+#[cfg_attr(feature = "diesel", diesel(sql_type = Text))]
+#[serde(transparent)]
+pub struct PlaylistItemId(String);
+
+impl PlaylistItemId {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl TryInto<PlaylistItemId> for &str {
+    type Error = PlaylistIdError;
+
+    fn try_into(self) -> Result<PlaylistItemId, Self::Error> {
+        const MINIMUM_LENGTH: usize = 11;
+        if self.len() < MINIMUM_LENGTH {
+            return Err(Self::Error::TooShort { minimum: MINIMUM_LENGTH, given: self.len() });
+        }
+        let invalid_char = self.chars().enumerate().find(|(_,c)| !matches!(c, 'A'..='Z'|'a'..='z'|'0'..='9'|'-'|'_'));
+        if let Some((index, c)) = invalid_char {
+            return Err(Self::Error::InvalidCharacter { index, char: c });
+        }
+        Ok(PlaylistItemId(self.to_owned()))
+    }
+}
+
+#[cfg(feature = "diesel")]
+impl<DB> ToSql<Text, DB> for PlaylistId where DB: Backend, str: ToSql<Text, DB> {
+    fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, DB>) -> diesel::serialize::Result {
+        let value: &str = self.as_ref();
+        value.to_sql(out)
+    }
+}
+
+#[cfg(feature = "diesel")]
+impl<DB> FromSql<Text, DB> for PlaylistId where DB: Backend, *const str: FromSql<Text, DB> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        type A = *const str;
+        let text = A::from_sql(bytes)?;
+        let text = unsafe { &*text };
+        let id: PlaylistId = text.try_into()?;
+        Ok(id)
+    }
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItem {
+    pub id: PlaylistItemId,
+    pub etag: String,
+    pub kind: String,
+    pub content_details: PlaylistContentDetailsPart,
+}
+
+#[derive(Clone,Debug,Deserialize,Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistContentDetailsPart {
+    video_id: VideoId,
+    video_published_at: DateTimeRfc3339,
+}
+
+// default paginated response
+#[derive(Clone,Debug,Deserialize,Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PageInfo {
-    #[serde(rename="totalResults")]
     pub total_results: usize,
-    #[serde(rename="resultsPerPage")]
     pub results_per_page: usize,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
-pub struct YoutubeMetadata {
+#[serde(rename_all = "camelCase")]
+pub struct PaginatedResponse<T> {
     pub kind: String,
     pub etag: String,
-    #[serde(default)]
-    pub items: Vec<Item>,
-    #[serde(rename="pageInfo")]
+    pub items: Vec<T>,
     pub page_info: PageInfo,
 }
 

@@ -18,6 +18,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 actix-web = { workspace = true }
+log = { workspace = true }
+test-log = { workspace = true }
 
 [features]
 diesel = ["dep:diesel"]

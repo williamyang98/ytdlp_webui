@@ -7,7 +7,7 @@ use app::database::{AudioExtension, WorkerStatus, TranscodeKey};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use youtube_api::{YoutubeVideoId, YoutubeVideoIdError};
+use youtube_api::{PlaylistId, PlaylistIdError, VideoId, VideoIdError};
 
 #[derive(Debug,Clone,Serialize,Display)]
 #[display("UserApiError({},{})", error, status_code)]
@@ -22,9 +22,16 @@ impl ApiError {
         Self { error, status_code }
     }
 
-    fn invalid_video_id(id: String, err: YoutubeVideoIdError) -> Self {
+    fn invalid_video_id(id: String, err: VideoIdError) -> Self {
         Self {
             error: format!("invalid video id {id}: {err:?}"),
+            status_code: StatusCode::BAD_REQUEST,
+        }
+    }
+
+    fn invalid_playlist_id(id: String, err: PlaylistIdError) -> Self {
+        Self {
+            error: format!("invalid playlist id {id}: {err:?}"),
             status_code: StatusCode::BAD_REQUEST,
         }
     }
@@ -67,7 +74,7 @@ struct RequestTranscodeResponse {
 #[allow(clippy::field_reassign_with_default)]
 pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let app = req.app_data::<Arc<App>>().unwrap();
@@ -77,17 +84,17 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
         .context("Failed to start download worker")
         .map_err(ApiError::internal_server)?
         .get_status();
-    // download metadata
-    let metadata = app.get_youtube_metadata_from_cache(&video_id).await;
-    let metadata = match metadata {
-        Ok(metadata) => Some(metadata),
+    // download video info
+    let video_info = app.get_youtube_video(&video_id).await;
+    let video_info = match video_info {
+        Ok(video_info) => Some(video_info),
         Err(err) => {
-            log::warn!("Failed to retrieve metadata for video_id={0} so skipping embedded thumbnail for audio_ext={1}: {2}", &video_id, audio_ext.as_str(), err);
+            log::warn!("Failed to retrieve youtube api video info for video_id={0} so skipping embedded thumbnail for audio_ext={1}: {2}", &video_id, audio_ext.as_str(), err);
             None
         },
     };
     // transcode
-    response.transcode_status = app.start_transcode(&transcode_key, metadata)
+    response.transcode_status = app.start_transcode(&transcode_key, video_info)
         .context("Failed to start transcode worker")
         .map_err(ApiError::internal_server)?
         .get_status();
@@ -97,7 +104,7 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
 #[actix_web::get("/delete_download/{video_id}")]
 pub async fn delete_download(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
     let video_id = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let app = req.app_data::<Arc<App>>().unwrap().clone();
     let result = web::block(move || app.delete_download(&video_id))
         .await
@@ -115,7 +122,7 @@ pub async fn delete_download(req: HttpRequest, path: web::Path<String>) -> actix
 #[actix_web::get("/delete_transcode/{video_id}/{extension}")]
 pub async fn delete_transcode(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let app = req.app_data::<Arc<App>>().unwrap().clone();
@@ -149,7 +156,7 @@ pub async fn get_transcodes(req: HttpRequest) -> actix_web::Result<HttpResponse>
 #[actix_web::get("/get_download/{video_id}")]
 pub async fn get_download(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
     let video_id = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let app = req.app_data::<Arc<App>>().unwrap();
     let entry = app.get_download(&video_id).map_err(ApiError::internal_server)?;
     let Some(entry) = entry else {
@@ -161,7 +168,7 @@ pub async fn get_download(req: HttpRequest, path: web::Path<String>) -> actix_we
 #[actix_web::get("/get_transcode/{video_id}/{extension}")]
 pub async fn get_transcode(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let transcode_key = TranscodeKey { video_id, audio_ext };
     let app = req.app_data::<Arc<App>>().unwrap();
@@ -175,7 +182,7 @@ pub async fn get_transcode(req: HttpRequest, path: web::Path<(String, String)>) 
 #[actix_web::get("/get_download_state/{video_id}")]
 pub async fn get_download_state(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
     let video_id = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let app = req.app_data::<Arc<App>>().unwrap();
     let worker = app.get_download_worker(&video_id);
     let Some(worker) = worker else {
@@ -187,7 +194,7 @@ pub async fn get_download_state(req: HttpRequest, path: web::Path<String>) -> ac
 #[actix_web::get("/get_transcode_state/{video_id}/{extension}")]
 pub async fn get_transcode_state(req: HttpRequest, path: web::Path<(String, String)>) -> actix_web::Result<HttpResponse> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let transcode_key = TranscodeKey { video_id: video_id.clone(), audio_ext };
     let app = req.app_data::<Arc<App>>().unwrap();
@@ -208,7 +215,7 @@ pub async fn get_download_link(
     req: HttpRequest, path: web::Path<(String, String)>, params: web::Query<DownloadLinkParams>,
 ) -> actix_web::Result<actix_files::NamedFile> {
     let (video_id, audio_ext) = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let audio_ext = AudioExtension::try_from(audio_ext.as_str()).map_err(|_| ApiError::invalid_audio_extension(audio_ext))?;
     let transcode_key = TranscodeKey { video_id, audio_ext };
     let app = req.app_data::<Arc<App>>().unwrap();
@@ -230,12 +237,21 @@ pub async fn get_download_link(
     Ok(attachment)
 }
 
-#[actix_web::get("/get_metadata/{video_id}")]
-pub async fn get_metadata(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+#[actix_web::get("/youtube_api/video/{video_id}")]
+pub async fn get_youtube_video(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
     let video_id = path.into_inner();
-    let video_id: YoutubeVideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
+    let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let app = req.app_data::<Arc<App>>().unwrap().clone();
-    let metadata = app.get_youtube_metadata_from_cache(&video_id).await.map_err(ApiError::internal_server)?;
-    Ok(HttpResponse::Ok().json(metadata.as_ref()))
+    let video_info = app.get_youtube_video(&video_id).await.map_err(ApiError::internal_server)?;
+    Ok(HttpResponse::Ok().json(video_info.as_ref()))
+}
+
+#[actix_web::get("/youtube_api/playlist/{playlist_id}")]
+pub async fn get_youtube_playlist(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+    let playlist_id = path.into_inner();
+    let playlist_id: PlaylistId = playlist_id.as_str().try_into().map_err(|e| ApiError::invalid_playlist_id(playlist_id, e))?;
+    let app = req.app_data::<Arc<App>>().unwrap().clone();
+    let playlist_info = app.get_youtube_playlist(&playlist_id).await.map_err(ApiError::internal_server)?;
+    Ok(HttpResponse::Ok().json(playlist_info.as_ref()))
 }
 

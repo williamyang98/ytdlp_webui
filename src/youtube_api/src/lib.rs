@@ -6,15 +6,26 @@ pub use schema::*;
 
 #[cfg(test)]
 mod test {
-    use crate::{YoutubeApi, YoutubeVideoId};
+    use crate::{Api, VideoId, PlaylistId};
 
     static VIDEO_ID: &str = "dQw4w9WgXcQ";
+    static PLAYLIST_ID: &str = "PLlaN88a7y2_oBUxLd3j23dkAFNtM-P24e";
 
-    #[actix_web::test]
-    async fn get_video_metadata() {
-        let api = YoutubeApi::default();
-        let video_id: YoutubeVideoId = VIDEO_ID.try_into().unwrap();
-        let result = api.get_video_metadata(&video_id).await.unwrap();
-        assert!(result.items.len() > 0);
+    #[test_log::test(actix_web::test)]
+    async fn get_video() {
+        let api = Api::default();
+        let video_id: VideoId = VIDEO_ID.try_into().unwrap();
+        let video = api.get_video(&video_id).await.unwrap();
+        log::debug!("{0:?}", video);
+        assert!(video.id == video_id);
+    }
+
+    #[test_log::test(actix_web::test)]
+    async fn get_playlist() {
+        let api = Api::default();
+        let playlist_id: PlaylistId = PLAYLIST_ID.try_into().unwrap();
+        let playlist = api.get_playlist(&playlist_id).await.unwrap();
+        log::debug!("{0:?}", playlist);
+        assert!(playlist.len() > 0);
     }
 }

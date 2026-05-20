@@ -23,7 +23,7 @@ use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::cast::FromPrimitive;
 use serde::Serialize;
 use thiserror::Error;
-use youtube_api::YoutubeVideoId;
+use youtube_api::VideoId;
 
 pub type DatabasePool = r2d2::Pool<r2d2::ConnectionManager<SqliteConnection>>;
 pub type DatabasePoolError = r2d2::PoolError;
@@ -102,7 +102,7 @@ impl<DB> FromSql<Text, DB> for AudioExtension where DB: Backend, *const str: Fro
 
 #[derive(Clone,Debug,PartialEq,Eq,Hash)]
 pub struct TranscodeKey {
-    pub video_id: YoutubeVideoId,
+    pub video_id: VideoId,
     pub audio_ext: AudioExtension,
 }
 
@@ -165,7 +165,7 @@ impl<DB> FromSql<Integer, DB> for WorkerStatus where DB: Backend, i32: FromSql<I
 #[diesel(table_name = ytdlp)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct YtdlpRow {
-    pub video_id: YoutubeVideoId,
+    pub video_id: VideoId,
     pub status: WorkerStatus,
     pub unix_time: UnixTimestamp,
     pub stdout_log_path: Option<String>,
@@ -178,7 +178,7 @@ pub struct YtdlpRow {
 #[diesel(table_name = ffmpeg)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct FfmpegRow {
-    pub video_id: YoutubeVideoId,
+    pub video_id: VideoId,
     pub audio_ext: AudioExtension,
     pub status: WorkerStatus,
     pub unix_time: UnixTimestamp,
@@ -264,7 +264,7 @@ impl DatabaseConnection {
         self.0.run_pending_migrations(MIGRATIONS).expect("Migration failed");
     }
 
-    pub fn insert_ytdlp_entry(&mut self, video_id: &YoutubeVideoId) -> DatabaseResult<bool> {
+    pub fn insert_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<bool> {
         use ytdlp::dsl as e;
         let total = diesel::replace_into(e::ytdlp)
             .values((
@@ -314,7 +314,7 @@ impl DatabaseConnection {
     }
 
     // delete
-    pub fn delete_ytdlp_entry(&mut self, video_id: &YoutubeVideoId) -> DatabaseResult<usize> {
+    pub fn delete_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<usize> {
         use ytdlp::dsl as e;
         diesel::delete(e::ytdlp)
             .filter(e::video_id.eq(video_id))
@@ -334,7 +334,7 @@ impl DatabaseConnection {
         e::ytdlp.load::<YtdlpRow>(&mut self.0)
     }
 
-    pub fn select_ytdlp_entry(&mut self, video_id: &YoutubeVideoId) -> DatabaseResult<Option<YtdlpRow>> {
+    pub fn select_ytdlp_entry(&mut self, video_id: &VideoId) -> DatabaseResult<Option<YtdlpRow>> {
         use ytdlp::dsl as e;
         e::ytdlp
             .filter(e::video_id.eq(video_id))
@@ -358,7 +358,7 @@ impl DatabaseConnection {
     }
 
     // select and update
-    pub fn select_and_update_ytdlp_entry<F>(&mut self, video_id: &YoutubeVideoId, callback: F) -> DatabaseResult<usize>
+    pub fn select_and_update_ytdlp_entry<F>(&mut self, video_id: &VideoId, callback: F) -> DatabaseResult<usize>
     where F: FnOnce(&mut YtdlpRow)
     {
         let entry = self.select_ytdlp_entry(video_id)?;

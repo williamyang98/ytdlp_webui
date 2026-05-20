@@ -4,20 +4,20 @@ use app::app::App;
 use app::app_config::AppConfig;
 use clap::Parser;
 use std::path::PathBuf;
-use youtube_api::{YoutubeVideoId, YoutubeVideoIdError};
+use youtube_api::{VideoId, VideoIdError};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Video id
     #[arg(default_value = "dQw4w9WgXcQ", value_parser = validate_video_id)]
-    video_id: YoutubeVideoId,
+    video_id: VideoId,
     /// Audio extension
     #[arg(long, default_value = AudioExtension::MP3.as_str(), value_parser = validate_audio_extension)]
     audio_extension: AudioExtension,
-    /// Download metadata
+    /// Download video_info
     #[arg(long)]
-    download_metadata: bool,
+    download_video_info: bool,
     /// Maximum number of transcode threads
     #[arg(long, default_value_t = 0)]
     total_transcode_threads: usize,
@@ -32,8 +32,8 @@ struct Args {
     env_file: PathBuf,
 }
 
-fn validate_video_id(s: &str) -> Result<YoutubeVideoId, String> {
-    s.try_into().map_err(|e: YoutubeVideoIdError| e.to_string())
+fn validate_video_id(s: &str) -> Result<VideoId, String> {
+    s.try_into().map_err(|e: VideoIdError| e.to_string())
 }
 
 fn validate_audio_extension(s: &str) -> Result<AudioExtension, String> {
@@ -82,14 +82,14 @@ async fn main() -> anyhow::Result<()> {
 
     let download_worker = app.start_download(&args.video_id)?;
     log::info!("download_worker: status={0:?}", download_worker.get_status());
-    let metadata = if args.download_metadata {
-        let metadata = app.get_youtube_metadata_from_cache(&args.video_id).await?;
-        log::info!("youtube_metadata: title={0:?}", metadata.items.first().map(|e| e.snippet.title.as_str()));
-        Some(metadata)
+    let video_info = if args.download_video_info {
+        let video_info = app.get_youtube_video(&args.video_id).await?;
+        log::info!("youtube_video_info: title={0:?}", video_info.items.first().map(|e| e.snippet.title.as_str()));
+        Some(video_info)
     } else {
         None
     };
-    let transcode_worker = app.start_transcode(&key, metadata)?;
+    let transcode_worker = app.start_transcode(&key, video_info)?;
     log::info!("start_transcode: status={0:?}", transcode_worker.get_status());
     transcode_worker.wait_busy();
     let state = transcode_worker.get_state();

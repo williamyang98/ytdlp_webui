@@ -3,15 +3,13 @@ use crate::database::{Database, FfmpegRow, TranscodeKey, YtdlpRow};
 use crate::util::defer;
 use crate::worker_download::{DownloadWorker, DownloadWorkers};
 use crate::worker_transcode::{TranscodeWorker, TranscodeWorkers};
-use dashmap::DashMap;
+use crate::youtube_api_cache::YoutubeApiCache;
+use youtube_api::{PaginatedResponse, PlaylistId, PlaylistItem, VideoId, VideoItem};
 use serde::Serialize;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use threadpool::ThreadPool;
-use youtube_api::{YoutubeApi, YoutubeMetadata, YoutubeVideoId};
 
-pub type YoutubeMetadataCache = Arc<DashMap<YoutubeVideoId, Arc<YoutubeMetadata>>>;
 
 #[derive(Clone)]
 pub struct App {
@@ -20,8 +18,7 @@ pub struct App {
     _threadpool: Arc<ThreadPool>,
     transcode_workers: Arc<TranscodeWorkers>,
     download_workers: Arc<DownloadWorkers>,
-    metadata_cache: YoutubeMetadataCache,
-    youtube_api: YoutubeApi,
+    youtube_api_cache: Arc<YoutubeApiCache>
 }
 
 #[derive(Debug, Serialize)]
@@ -48,75 +45,23 @@ impl App {
         let threadpool = Arc::new(ThreadPool::new(app_config.total_transcode_threads));
         let download_workers = Arc::new(DownloadWorkers::new(database.clone(), threadpool.clone(), app_config.clone()));
         let transcode_workers = Arc::new(TranscodeWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), download_workers.clone()));
-        let metadata_cache: YoutubeMetadataCache = Arc::new(DashMap::<YoutubeVideoId, Arc<YoutubeMetadata>>::new());
-        let youtube_api = YoutubeApi::default();
+        let youtube_api_cache = Arc::new(YoutubeApiCache::new(app_config.clone())?);
         Ok(Self {
             app_config,
             database,
             _threadpool: threadpool,
             download_workers,
             transcode_workers,
-            metadata_cache,
-            youtube_api,
+            youtube_api_cache,
         })
     }
 
-    pub async fn get_youtube_metadata_from_cache(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Arc<YoutubeMetadata>> {
-        if let Some(metadata) = self.metadata_cache.get(video_id) {
-            return Ok(metadata.clone());
-        }
 
-        // load from filepath
-        let filepath = self.app_config.metadata_folder.join(format!("{0}.json", video_id.as_str()));
-        let load_from_filepath = |path: &Path| -> anyhow::Result<Option<YoutubeMetadata>> {
-            if !path.exists() {
-                log::debug!("Metadata cache miss from disk: {0}", path.to_string_lossy());
-                return Ok(None);
-            }
-            let data = std::fs::read_to_string(path)?;
-            let metadata: YoutubeMetadata = serde_json::from_str(data.as_str())?;
-            Ok(Some(metadata))
-        };
-        let metadata: Option<YoutubeMetadata> = match load_from_filepath(&filepath) {
-            Ok(metadata) => {
-                log::debug!("Metadata cache hit from disk: {0}", filepath.to_string_lossy());
-                metadata
-            },
-            Err(err) => {
-                log::error!("Failed to parse cached metadata on disk at {0}: {1:?}", filepath.to_string_lossy(), err);
-                None
-            },
-        };
-
-        let write_to_filepath = |path: &Path, metadata: &YoutubeMetadata| -> anyhow::Result<()> {
-            let mut file = std::fs::File::create(path)?;
-            let data = serde_json::to_string(metadata)?;
-            file.write_all(data.as_bytes())?;
-            Ok(())
-        };
-
-        let metadata = match metadata {
-            Some(metadata) => metadata,
-            None => {
-                let metadata = self.youtube_api.get_video_metadata(video_id).await?;
-                if let Err(err) = write_to_filepath(&filepath, &metadata) {
-                    log::error!("Failed to cache metadata to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
-                } else {
-                    log::debug!("Cached metadata to disk at {0}", filepath.to_string_lossy());
-                }
-                metadata
-            },
-        };
-        let metadata = Arc::new(metadata);
-        self.metadata_cache.insert(video_id.clone(), metadata.clone());
-        Ok(metadata)
+    pub fn start_transcode(&self, key: &TranscodeKey, video_info: Option<Arc<PaginatedResponse<VideoItem>>>) -> anyhow::Result<Arc<TranscodeWorker>> {
+        self.transcode_workers.start_worker(key, video_info)
     }
 
-    pub fn start_transcode(&self, key: &TranscodeKey, metadata: Option<Arc<YoutubeMetadata>>) -> anyhow::Result<Arc<TranscodeWorker>> {
-        self.transcode_workers.start_worker(key, metadata)
-    }
-
-    pub fn start_download(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Arc<DownloadWorker>> {
+    pub fn start_download(&self, video_id: &VideoId) -> anyhow::Result<Arc<DownloadWorker>> {
         self.download_workers.start_worker(video_id)
     }
 
@@ -158,7 +103,7 @@ impl App {
         deleted_results
     }
 
-    pub fn delete_download(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Option<DeleteResponse>> {
+    pub fn delete_download(&self, video_id: &VideoId) -> anyhow::Result<Option<DeleteResponse>> {
         if let Some(worker) = self.download_workers.get_worker(video_id) {
             if worker.get_status().is_busy() {
                 return Ok(Some(DeleteResponse::Busy));
@@ -232,7 +177,7 @@ impl App {
         Ok(entries)
     }
 
-    pub fn get_download(&self, video_id: &YoutubeVideoId) -> anyhow::Result<Option<YtdlpRow>> {
+    pub fn get_download(&self, video_id: &VideoId) -> anyhow::Result<Option<YtdlpRow>> {
         let entry = self.database
             .connect()?
             .select_ytdlp_entry(video_id)?;
@@ -246,12 +191,20 @@ impl App {
         Ok(entry)
     }
 
-    pub fn get_download_worker(&self, video_id: &YoutubeVideoId) -> Option<Arc<DownloadWorker>> {
+    pub fn get_download_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
         self.download_workers.get_worker(video_id)
     }
 
     pub fn get_transcode_worker(&self, key: &TranscodeKey) -> Option<Arc<TranscodeWorker>> {
         self.transcode_workers.get_worker(key)
+    }
+
+    pub async fn get_youtube_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<PaginatedResponse<VideoItem>>> {
+        self.youtube_api_cache.get_video(video_id).await
+    }
+
+    pub async fn get_youtube_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<PaginatedResponse<PlaylistItem>>> {
+        self.youtube_api_cache.get_playlist(playlist_id).await
     }
 
     pub fn get_download_abspath(&self, key: &TranscodeKey) -> anyhow::Result<Option<PathBuf>> {
