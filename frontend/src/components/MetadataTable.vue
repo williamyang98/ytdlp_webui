@@ -71,7 +71,7 @@ const youtube_link = computed(() => {
   </div>
   <div class="w-full max-h-100 overflow-y-auto overflow-x-hidden">
     <span class="font-medium text-nowrap">Description</span>
-    <p class="text-sm">{{ item.snippet.description }}</p>
+    <p class="text-sm whitespace-pre-wrap">{{ item.snippet.description }}</p>
   </div>
 </div>
 </template>
