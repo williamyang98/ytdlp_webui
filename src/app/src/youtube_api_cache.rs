@@ -1,5 +1,7 @@
 use dashmap::DashMap;
-use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId, PaginatedResponse};
+use serde::de::DeserializeOwned;
+use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId, PaginatedResponse, ApiResponse};
+use std::hash::Hash;
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::io::Write;
@@ -39,86 +41,64 @@ impl YoutubeApiCache {
     }
 
     pub async fn get_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<PaginatedResponse<VideoItem>>> {
-        if let Some(response) = self.videos_cache.get(video_id) {
-            return Ok(response.clone());
-        }
-
-        // load from filepath
         let filepath = self.videos_folder.join(format!("{0}.json", video_id.as_str()));
-        let load_from_filepath = |path: &Path| -> anyhow::Result<Option<PaginatedResponse<VideoItem>>> {
-            if !path.exists() {
-                return Ok(None);
-            }
-            let data = std::fs::read_to_string(path)?;
-            let response: PaginatedResponse<VideoItem> = serde_json::from_str(data.as_str())?;
-            Ok(Some(response))
-        };
-
-        let video: Option<PaginatedResponse<VideoItem>> = match load_from_filepath(&filepath) {
-            Ok(None) => {
-                log::debug!("video cache miss from disk: {0}", filepath.to_string_lossy());
-                None
-            },
-            Ok(Some(response)) => {
-                log::debug!("got video cache hit from disk: {0}", filepath.to_string_lossy());
-                Some(response)
-            },
-            Err(err) => {
-                log::error!("failed to parse cached video on disk at {0}: {1:?}", filepath.to_string_lossy(), err);
-                None
-            },
-        };
-
-        let write_to_filepath = |path: &Path, text: &str| -> anyhow::Result<()> {
-            let mut file = std::fs::File::create(path)?;
-            file.write_all(text.as_bytes())?;
-            Ok(())
-        };
-
-        let video = match video {
-            Some(video) => video,
-            None => {
-                let response = self.api.get_video(video_id).await?;
-                if let Err(err) = write_to_filepath(&filepath, &response.text) {
-                    log::error!("failed to cache video to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
-                } else {
-                    log::debug!("successfully cached video to disk at {0}", filepath.to_string_lossy());
-                }
-                response.value
-            },
-        };
-        let video = Arc::new(video);
-        self.videos_cache.insert(video_id.clone(), video.clone());
-        Ok(video)
+        self.cache_response(
+            "video",
+            &filepath,
+            video_id,
+            &self.videos_cache,
+            async || self.api.get_video(video_id).await,
+        ).await
     }
 
     pub async fn get_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<PaginatedResponse<PlaylistItem>>> {
-        if let Some(response) = self.playlists_cache.get(playlist_id) {
+        let filepath = self.playlists_folder.join(format!("{0}.json", playlist_id.as_str()));
+        self.cache_response(
+            "playlist",
+            &filepath,
+            playlist_id,
+            &self.playlists_cache,
+            async || self.api.get_playlist(playlist_id).await,
+        ).await
+    }
+
+    async fn cache_response<K,V>(
+        &self,
+        label: &'static str,
+        filepath: &Path,
+        key: &K,
+        cache: &DashMap<K, Arc<V>>,
+        api_fallback: impl AsyncFnOnce() -> anyhow::Result<ApiResponse<V>>,
+    ) -> anyhow::Result<Arc<V>>
+    where
+        K: Hash + Eq + Clone,
+        V: DeserializeOwned,
+    {
+        if let Some(response) = cache.get(key) {
             return Ok(response.clone());
         }
 
         // load from filepath
-        let filepath = self.playlists_folder.join(format!("{0}.json", playlist_id.as_str()));
-        let load_from_filepath = |path: &Path| -> anyhow::Result<Option<PaginatedResponse<PlaylistItem>>> {
+        let load_from_filepath = |path: &Path| -> anyhow::Result<Option<V>> {
             if !path.exists() {
                 return Ok(None);
             }
             let data = std::fs::read_to_string(path)?;
-            let response: PaginatedResponse<PlaylistItem> = serde_json::from_str(data.as_str())?;
+            let response: V = serde_json::from_str(data.as_str())?;
             Ok(Some(response))
         };
 
-        let playlist: Option<PaginatedResponse<PlaylistItem>> = match load_from_filepath(&filepath) {
+        let value: Option<V> = match load_from_filepath(filepath) {
             Ok(None) => {
-                log::debug!("playlist cache miss from disk: {0}", filepath.to_string_lossy());
+                log::debug!("{label} cache miss from disk: {0}", filepath.to_string_lossy());
                 None
             },
             Ok(Some(response)) => {
-                log::debug!("got playlist cache hit from disk: {0}", filepath.to_string_lossy());
+                log::debug!("got {label} cache hit from disk: {0}", filepath.to_string_lossy());
                 Some(response)
             },
             Err(err) => {
-                log::error!("failed to parse cached playlist on disk at {0}: {1:?}", filepath.to_string_lossy(), err);
+                log::error!("failed to parse cached {label} on disk at {0}: {1:?}", filepath.to_string_lossy(), err);
                 None
             },
         };
@@ -129,20 +109,21 @@ impl YoutubeApiCache {
             Ok(())
         };
 
-        let playlist = match playlist {
-            Some(playlist) => playlist,
+        let value = match value {
+            Some(value) => value,
             None => {
-                let response = self.api.get_playlist(playlist_id).await?;
-                if let Err(err) = write_to_filepath(&filepath, &response.text) {
-                    log::error!("failed to cache playlist to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
+                // store entire response body onto disk, not just reserialising the deserialised value
+                let response = api_fallback().await?;
+                if let Err(err) = write_to_filepath(filepath, &response.text) {
+                    log::error!("failed to cache {label} to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
                 } else {
-                    log::debug!("successfully cached playlist to disk at {0}", filepath.to_string_lossy());
+                    log::debug!("successfully cached {label} to disk at {0}", filepath.to_string_lossy());
                 }
                 response.value
             },
         };
-        let playlist = Arc::new(playlist);
-        self.playlists_cache.insert(playlist_id.clone(), playlist.clone());
-        Ok(playlist)
+        let value = Arc::new(value);
+        cache.insert(key.clone(), value.clone());
+        Ok(value)
     }
 }
