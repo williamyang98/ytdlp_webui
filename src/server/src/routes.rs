@@ -78,11 +78,16 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
         .map_err(ApiError::internal_server)?
         .get_status();
     // download metadata
-    let metadata = app.get_youtube_metadata_from_cache(&video_id).await
-        .context("Failed to get youtube metadata")
-        .map_err(ApiError::internal_server)?;
+    let metadata = app.get_youtube_metadata_from_cache(&video_id).await;
+    let metadata = match metadata {
+        Ok(metadata) => Some(metadata),
+        Err(err) => {
+            log::warn!("Failed to retrieve metadata for video_id={0} so skipping embedded thumbnail for audio_ext={1}: {2}", &video_id, audio_ext.as_str(), err);
+            None
+        },
+    };
     // transcode
-    response.transcode_status = app.start_transcode(&transcode_key, Some(metadata))
+    response.transcode_status = app.start_transcode(&transcode_key, metadata)
         .context("Failed to start transcode worker")
         .map_err(ApiError::internal_server)?
         .get_status();
