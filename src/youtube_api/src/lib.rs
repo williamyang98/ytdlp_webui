@@ -15,7 +15,8 @@ mod test {
     async fn get_video() {
         let api = Api::default();
         let video_id: VideoId = VIDEO_ID.try_into().unwrap();
-        let video = api.get_video(&video_id).await.unwrap();
+        let response = api.get_video(&video_id).await.unwrap();
+        let video = response.value.items.first().unwrap();
         log::debug!("{0:?}", video);
         assert!(video.id == video_id);
     }
@@ -24,8 +25,9 @@ mod test {
     async fn get_playlist() {
         let api = Api::default();
         let playlist_id: PlaylistId = PLAYLIST_ID.try_into().unwrap();
-        let playlist = api.get_playlist(&playlist_id).await.unwrap();
+        let response = api.get_playlist(&playlist_id).await.unwrap();
+        let playlist = response.value;
         log::debug!("{0:?}", playlist);
-        assert!(playlist.len() > 0);
+        assert!(playlist.items.len() > 0);
     }
 }
