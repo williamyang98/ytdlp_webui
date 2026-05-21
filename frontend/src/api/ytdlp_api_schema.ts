@@ -18,6 +18,7 @@ function into_option<T>(value: T | undefined | null): T | undefined {
 }
 
 export const DownloadStateSchema = z.object({
+  id: z.uuidv4(),
   worker_status: WorkerStatusSchema,
   file_cached: z.boolean(),
   fail_reason: z.string().nullish().transform(into_option),
@@ -31,6 +32,7 @@ export const DownloadStateSchema = z.object({
 });
 
 export const TranscodeStateSchema = z.object({
+  id: z.uuidv4(),
   worker_status: WorkerStatusSchema,
   file_cached: z.boolean(),
   fail_reason: z.string().nullish().transform(into_option),

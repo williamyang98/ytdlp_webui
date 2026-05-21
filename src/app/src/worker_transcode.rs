@@ -14,9 +14,11 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
+use uuid::Uuid;
 
 #[derive(Debug,Clone,Serialize)]
 pub struct TranscodeState {
+    pub id: Uuid,
     pub worker_status: WorkerStatus,
     pub file_cached: bool,
     pub fail_reason: Option<String>,
@@ -35,6 +37,7 @@ impl Default for TranscodeState {
     fn default() -> Self {
         let curr_time = get_unix_time();
         Self {
+            id: Uuid::new_v4(),
             worker_status: WorkerStatus::default(),
             file_cached: false,
             fail_reason: None,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { type TranscodeState } from "../api/ytdlp_api_schema.ts";
 import { convert_dhms_to_string, convert_seconds_to_dhms } from "../utility/format.ts";
-import { computed } from "vue";
+import { ref, computed, watch } from "vue";
 
 const props = defineProps<{
   state: TranscodeState | null,
@@ -60,12 +60,12 @@ const status = computed((): string => {
   return "Running";
 });
 
-const subtitle = computed((): string | null => {
-  const state = props.state;
-  if (state === null) return "Waiting for transcode to be queued";
-  if (state.file_cached) return null;
-  switch (state.worker_status) {
-    case "failed": return state.fail_reason || "Failed with unprovided reason";
+const subtitle = ref<string | null>(null);
+function update_subtitle(new_state: TranscodeState | null, old_state: TranscodeState | null): string | null {
+  if (new_state === null) return "Waiting for transcode to be queued";
+  if (new_state.file_cached) return null;
+  switch (new_state.worker_status) {
+    case "failed": return new_state.fail_reason || "Failed with unprovided reason";
     case "queued": return "Waiting for transcode to run";
     case "running": break;
     case "finished":  break;
@@ -76,21 +76,6 @@ const subtitle = computed((): string | null => {
   //   const { value: speed_bits, prefix: speed_bits_unit } = convert_to_short_standard_prefix(state.source_speed_bits);
   //   const { value: transcode_bits, prefix: transcode_bits_unit } = convert_to_short_standard_prefix(state.transcode_speed_bits);
   // }
-
-  // estimate eta given elapsed time and percentage
-  const time_elapsed_milliseconds = state.end_time_unix.getTime() - state.start_time_unix.getTime();
-  const time_elapsed_seconds = time_elapsed_milliseconds/1000;
-  if (state.transcode_duration_milliseconds === undefined || state.source_duration_milliseconds === undefined) {
-    return null;
-  }
-  const percentage = state.transcode_duration_milliseconds / Math.max(state.source_duration_milliseconds, 1);
-  const remaining_percentage = 1 - percentage;
-  const eta_seconds = (time_elapsed_seconds/percentage)*remaining_percentage;
-
-  const eta_seconds_string = convert_dhms_to_string(convert_seconds_to_dhms(eta_seconds));
-  const elapsed_time_string = convert_dhms_to_string(convert_seconds_to_dhms(state.transcode_duration_milliseconds/1000));
-  const total_time_string = convert_dhms_to_string(convert_seconds_to_dhms(state.source_duration_milliseconds/1000));
-  const text_time_progress = `${elapsed_time_string}/${total_time_string}`;
 
   // This is now garbage because the transcode size gives erroneous values when embedding thumbnail
   // if (state.transcode_size_bytes !== undefined) {
@@ -108,12 +93,43 @@ const subtitle = computed((): string | null => {
   //   return text;
   // }
 
+  // estimate eta given elapsed time and percentage
+  if (new_state.transcode_duration_milliseconds === undefined || new_state.source_duration_milliseconds === undefined) {
+    return null;
+  }
+  // progress values
+  const elapsed_time_string = convert_dhms_to_string(convert_seconds_to_dhms(new_state.transcode_duration_milliseconds/1000));
+  const total_time_string = convert_dhms_to_string(convert_seconds_to_dhms(new_state.source_duration_milliseconds/1000));
+  const text_time_progress = `${elapsed_time_string}/${total_time_string}`;
+
   // Estimate speed of transcode in transcode_duration per second
-  const transcode_duration_seconds = state.transcode_duration_milliseconds/1000;
-  const estimated_transcode_speed = (time_elapsed_seconds === 0) ? 0 : transcode_duration_seconds / time_elapsed_seconds;
+  let measure_duration_start_seconds: number = 0;
+  const measure_duration_end_seconds = new_state.transcode_duration_milliseconds/1000;
+  let measure_time_start_seconds = new_state.start_time_unix.getTime()/1000;
+  const measure_time_end_seconds = new_state.end_time_unix.getTime()/1000;
+  // try to use most recent measurement for more accurate speed estimate
+  if (old_state !== null && old_state.id === new_state.id) {
+    if (old_state.transcode_duration_milliseconds !== undefined) {
+      measure_duration_start_seconds = old_state.transcode_duration_milliseconds/1000;
+      measure_time_start_seconds = old_state.end_time_unix.getTime()/1000;
+    }
+  }
+  // estimate speed
+  const measure_duration_span_seconds = measure_duration_end_seconds-measure_duration_start_seconds;
+  const measure_time_span_seconds = measure_time_end_seconds-measure_time_start_seconds;
+  const estimated_transcode_speed = (measure_time_span_seconds === 0) ? 0 : measure_duration_span_seconds / measure_time_span_seconds;
   const estimated_transcode_speed_string = convert_dhms_to_string(convert_seconds_to_dhms(estimated_transcode_speed));
+  // calculate eta
+  const remaining_transcode_duration_seconds = (new_state.source_duration_milliseconds-new_state.transcode_duration_milliseconds)/1000;
+  const eta_seconds = (estimated_transcode_speed === 0) ? 0 : remaining_transcode_duration_seconds / estimated_transcode_speed;
+  const eta_seconds_string = convert_dhms_to_string(convert_seconds_to_dhms(eta_seconds));
+
   const text = `${text_time_progress} @ ${estimated_transcode_speed_string}/s (ETA ${eta_seconds_string})`
   return text;
+}
+const state = computed(() => props.state);
+watch(state, (new_state, old_state) => {
+  subtitle.value = update_subtitle(new_state, old_state);
 });
 
 const subtitle_colour = computed(() => props.state?.worker_status === "failed" ? "text-error-content" : "");

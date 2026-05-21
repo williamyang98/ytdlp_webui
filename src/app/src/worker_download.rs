@@ -12,10 +12,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
 use threadpool::ThreadPool;
+use uuid::Uuid;
 use youtube_api::VideoId;
 
 #[derive(Clone,Debug,Serialize)]
 pub struct DownloadState {
+    pub id: Uuid,
     pub worker_status: WorkerStatus,
     pub file_cached: bool,
     pub fail_reason: Option<String>,
@@ -32,6 +34,7 @@ impl Default for DownloadState {
     fn default() -> Self {
         let curr_time = get_unix_time();
         Self {
+            id: Uuid::new_v4(),
             worker_status: WorkerStatus::Queued,
             file_cached: false,
             fail_reason: None,
