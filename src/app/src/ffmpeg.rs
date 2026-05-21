@@ -239,7 +239,7 @@ pub fn create_ffmpeg_transcode_arguments(
         args.extend(values.iter().map(|&s| s.to_owned()));
     };
     let push_video_info = |args: &mut Vec<String>, field: &str, value: &str| {
-        args.extend(["-video_info".to_owned(), format!("{0}={1}", field, value)]);
+        args.extend(["-metadata".to_owned(), format!("{0}={1}", field, value)]);
     };
     push_args(&mut args, &["-i", input_path.to_str().unwrap()]);
     let can_embed_thumbnail = &[AudioExtension::MP3].contains(&audio_ext);
