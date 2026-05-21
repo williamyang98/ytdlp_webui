@@ -77,16 +77,37 @@ impl Api {
     pub async fn get_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<ApiResponse<PaginatedResponse<PlaylistItem>>> {
         const MAX_RESULTS: usize = 50;
         let url = format!("{0}/playlistItems?part=contentDetails&playlistId={1}&key={2}&maxResults={3}", &self.base_url, playlist_id, self.api_key, MAX_RESULTS);
-        let response = self.client
-            .get(url)
-            .send()
-            .await?;
-        let text = response
-            .error_for_status()?
-            .text()
-            .await.context("Getting body from response")?;
-        let value: PaginatedResponse<PlaylistItem> = serde_json::from_str(text.as_str())
-            .with_context(|| format!("Failed to parse body into json: {text}"))?;
+        let mut value: Option<PaginatedResponse<PlaylistItem>> = None;
+        loop {
+            let url = match value.as_ref() {
+                None => url.clone(), // empty start
+                Some(value) => match value.next_page_token.as_ref() {
+                    None => break, // page end
+                    Some(token) => format!("{url}&pageToken={token}"), // page continue
+                },
+            };
+            let response = self.client
+                .get(url)
+                .send()
+                .await?;
+            let text = response
+                .error_for_status()?
+                .text()
+                .await.context("Getting body from response")?;
+            let new_value: PaginatedResponse<PlaylistItem> = serde_json::from_str(text.as_str())
+                .with_context(|| format!("Failed to parse body into json: {text}"))?;
+            // concatenate the pages together to make it easier to cache into a single file
+            if let Some(old_value) = value.as_mut() {
+                old_value.items.extend_from_slice(new_value.items.as_slice());
+                old_value.prev_page_token = new_value.prev_page_token;
+                old_value.next_page_token = new_value.next_page_token;
+                old_value.page_info.results_per_page += new_value.items.len();
+            } else {
+                value = Some(new_value);
+            }
+        }
+        let value = value.expect("Paginated playlist items should be available after fetch and concatenating each page");
+        let text = serde_json::to_string(&value).unwrap();
         let response = ApiResponse { value, text };
         Ok(response)
     }

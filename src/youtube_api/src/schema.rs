@@ -12,6 +12,9 @@ use diesel::{
     sql_types::Text,
 };
 
+// serialise the unknown parts as well when we cache the results to disk
+type Extra = serde_json::Map<String, serde_json::Value>;
+
 // https://www.rfc-editor.org/rfc/rfc3339.html
 // RFC3339 is a stricter profile for ISO8601
 #[derive(Debug,Clone,Serialize,Deserialize)]
@@ -80,6 +83,7 @@ pub struct Thumbnail {
     pub url: String,
     pub width: usize,
     pub height: usize,
+    #[serde(flatten)] _extras: Extra,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
@@ -90,6 +94,7 @@ pub struct VideoContentDetailsPart {
     pub definition: String,
     pub caption: String,
     pub licensed_content: bool,
+    #[serde(flatten)] _extras: Extra,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
@@ -105,6 +110,7 @@ pub struct VideoSnippetPart {
     #[serde(default)]
     pub tags: Vec<String>,
     pub category_id: String,
+    #[serde(flatten)] _extras: Extra,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
@@ -115,6 +121,7 @@ pub struct VideoItem {
     pub kind: String,
     pub snippet: VideoSnippetPart,
     pub content_details: VideoContentDetailsPart,
+    #[serde(flatten)] _extras: Extra,
 }
 
 // Playlist Items
@@ -209,13 +216,15 @@ pub struct PlaylistItem {
     pub etag: String,
     pub kind: String,
     pub content_details: PlaylistContentDetailsPart,
+    #[serde(flatten)] _extras: Extra,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistContentDetailsPart {
-    video_id: VideoId,
-    video_published_at: DateTimeRfc3339,
+    pub video_id: VideoId,
+    pub video_published_at: DateTimeRfc3339,
+    #[serde(flatten)] _extras: Extra,
 }
 
 // default paginated response
@@ -224,6 +233,7 @@ pub struct PlaylistContentDetailsPart {
 pub struct PageInfo {
     pub total_results: usize,
     pub results_per_page: usize,
+    #[serde(flatten)] _extras: Extra,
 }
 
 #[derive(Clone,Debug,Deserialize,Serialize)]
@@ -233,5 +243,8 @@ pub struct PaginatedResponse<T> {
     pub etag: String,
     pub items: Vec<T>,
     pub page_info: PageInfo,
+    pub prev_page_token: Option<String>,
+    pub next_page_token: Option<String>,
+    #[serde(flatten)] _extras: Extra,
 }
 
