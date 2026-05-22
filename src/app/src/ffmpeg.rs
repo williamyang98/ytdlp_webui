@@ -228,54 +228,65 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
     None
 }
 
+// Refer to https://ffmpeg.org/ffmpeg.html for description of arguments
 pub fn create_ffmpeg_transcode_arguments(
     input_path: &Path, output_path: &Path,
     video_id: &VideoId, audio_ext: AudioExtension,
     video_info: Option<&VideoItem>,
 ) -> Vec<String> {
-    // spawn process
     let mut args = Vec::<String>::new();
     let push_args = |args: &mut Vec<String>, values: &[&str]| {
         args.extend(values.iter().map(|&s| s.to_owned()));
     };
-    let push_video_info = |args: &mut Vec<String>, field: &str, value: &str| {
-        args.extend(["-metadata".to_owned(), format!("{0}={1}", field, value)]);
-    };
+    // audio as input stream 0
     push_args(&mut args, &["-i", input_path.to_str().unwrap()]);
-    let can_embed_thumbnail = &[AudioExtension::MP3].contains(&audio_ext);
+    // thumbnail as input stream 1
     let thumbnail = || -> Option<Thumbnail> {
-        if !can_embed_thumbnail {
-            return None;
-        }
         let video_info = video_info?;
-        let mut thumbnails: Vec<Thumbnail> = video_info.snippet.thumbnails.values().cloned().collect();
+        let mut thumbnails: Vec<&Thumbnail> = video_info.snippet.thumbnails.values().collect();
         thumbnails.sort_by_key(|thumbnail| thumbnail.width * thumbnail.height);
-        thumbnails.last().cloned()
+        thumbnails.pop().cloned()
     } ();
-    if let Some(ref thumbnail) = thumbnail {
+    if let Some(thumbnail) = thumbnail.as_ref() {
         push_args(&mut args, &["-i", thumbnail.url.as_str()]);
     }
+    // map input stream 0 audio to output stream 0
     push_args(&mut args, &["-map", "0:a"]);
-    if thumbnail.is_some() {
-        push_args(&mut args, &["-map", "1"]);
+    // map input stream 1 thumbnail to output stream 0
+    if let Some(_thumbnail) = thumbnail.as_ref() {
+        if audio_ext == AudioExtension::MP3 {
+            push_args(&mut args, &["-map", "1:v:0"]);
+            push_args(&mut args, &["-disposition:0", "attached_pic"]);
+        } else {
+            log::warn!("Thumbnail unsupported for audio_ext={0} while transcoding video_ext={1}", audio_ext.as_str(), video_id);
+        }
     }
-    push_video_info(&mut args, "video_id", video_id.as_str());
+    // copy existing metadata from input stream 0 global to output stream 0 audio
+    // chapters are only supported for specific file types like m4a in players like VLC
+    push_args(&mut args, &["-map_metadata:s:a", "0:g"]);
+    push_args(&mut args, &["-map_chapters", "0"]);
+    // // add metadata
+    let push_metadata = |args: &mut Vec<String>, field: &str, value: &str| {
+        args.extend(["-metadata".to_owned(), format!("{0}={1}", field, value)]);
+    };
+    let end_metadata = |args: &mut Vec<String>| push_args(args, &["-id3v2_version", "3"]);
+    push_metadata(&mut args, "video_id", video_id.as_str());
     if let Some(video_info) = video_info {
-        push_video_info(&mut args, "title", video_info.snippet.title.as_str());
-        push_video_info(&mut args, "artist", video_info.snippet.channel_title.as_str());
-        push_video_info(&mut args, "description", video_info.snippet.description.as_str());
-        push_video_info(&mut args, "published_at", serde_json::to_string(&video_info.snippet.published_at).unwrap().as_str());
-        push_args(&mut args, &["-id3v2_version", "3"]);
-        let mut thumbnails: Vec<(&String, &Thumbnail)> = video_info.snippet.thumbnails.iter().collect();
-        thumbnails.sort_by_key(|(_, thumbnail)| thumbnail.width * thumbnail.height);
+        push_metadata(&mut args, "title", video_info.snippet.title.as_str());
+        push_metadata(&mut args, "artist", video_info.snippet.channel_title.as_str());
+        push_metadata(&mut args, "description", video_info.snippet.description.as_str());
+        if let Ok(date) = serde_json::to_string(&video_info.snippet.published_at) {
+            push_metadata(&mut args, "published_at", date.as_str());
+        } else {
+            log::warn!("Failed to format published_at date: {0:?}", &video_info.snippet.published_at);
+        }
+        end_metadata(&mut args);
     }
-    if thumbnail.is_some() {
-        push_args(&mut args, &["-disposition:0", "attached_pic"]);
-    }
+    // transcoding arguments
     push_args(&mut args, &[
         "-threads", "0",
         "-progress", "-", "-y",
-        output_path.to_str().unwrap(),
+        &output_path.to_string_lossy(),
     ]);
     args
 }

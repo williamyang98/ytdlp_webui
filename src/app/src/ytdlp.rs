@@ -9,6 +9,7 @@ pub fn get_ytdlp_arguments<'a>(url: &'a str, ffmpeg_binary_path: &'a str, output
     [
         url,
         "--extract-audio",
+        "--embed-chapters", // include youtube chapters
         "--format", "bestaudio",
         "--no-continue", // override existing files
         "--no-simulate", // avoid running simulation when changing templates
