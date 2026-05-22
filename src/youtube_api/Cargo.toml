@@ -9,6 +9,7 @@ dotenvy = { workspace = true }
 derive_more = { workspace = true }
 diesel = { workspace = true, optional = true }
 lazy_static = { workspace = true }
+log = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -18,7 +19,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 actix-web = { workspace = true }
-log = { workspace = true }
 test-log = { workspace = true }
 
 [features]

@@ -4,7 +4,7 @@ use crate::ffmpeg;
 use crate::util::get_unix_time;
 use crate::worker_download::DownloadWorkers;
 use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
-use youtube_api::{PaginatedResponse, VideoItem};
+use youtube_api::VideoItem;
 use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
@@ -198,7 +198,7 @@ impl TranscodeWorkers {
         self.cache.remove(key).map(|(_key, value)| value)
     }
 
-    pub fn start_worker(&self, key: &TranscodeKey, video_info: Option<Arc<PaginatedResponse<VideoItem>>>) -> anyhow::Result<Arc<TranscodeWorker>> {
+    pub fn start_worker(&self, key: &TranscodeKey, video_info: Option<Arc<VideoItem>>) -> anyhow::Result<Arc<TranscodeWorker>> {
         // check cache hit
         if let Some(worker) = self.cache.get(key) {
             let state = worker.state.lock().unwrap();
@@ -366,7 +366,7 @@ fn create_transcode_command(
     key: &TranscodeKey,
     input_path: &Path,
     output_path: &Path,
-    video_info: Option<&PaginatedResponse<VideoItem>>,
+    video_info: Option<&VideoItem>,
     app_config: &AppConfig,
 ) -> anyhow::Result<Command> {
     let mut command = Command::new(&app_config.ffmpeg_command);

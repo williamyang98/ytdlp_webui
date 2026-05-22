@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use thiserror::Error;
 use crate::database::AudioExtension;
-use youtube_api::{Thumbnail, VideoId, VideoItem, PaginatedResponse};
+use youtube_api::{Thumbnail, VideoId, VideoItem};
 
 #[derive(Clone,Copy,Debug)]
 enum SizeBytes {
@@ -231,7 +231,7 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
 pub fn create_ffmpeg_transcode_arguments(
     input_path: &Path, output_path: &Path,
     video_id: &VideoId, audio_ext: AudioExtension,
-    video_info: Option<&PaginatedResponse<VideoItem>>,
+    video_info: Option<&VideoItem>,
 ) -> Vec<String> {
     // spawn process
     let mut args = Vec::<String>::new();
@@ -248,8 +248,7 @@ pub fn create_ffmpeg_transcode_arguments(
             return None;
         }
         let video_info = video_info?;
-        let item = video_info.items.first()?;
-        let mut thumbnails: Vec<Thumbnail> = item.snippet.thumbnails.values().cloned().collect();
+        let mut thumbnails: Vec<Thumbnail> = video_info.snippet.thumbnails.values().cloned().collect();
         thumbnails.sort_by_key(|thumbnail| thumbnail.width * thumbnail.height);
         thumbnails.last().cloned()
     } ();
@@ -262,15 +261,13 @@ pub fn create_ffmpeg_transcode_arguments(
     }
     push_video_info(&mut args, "video_id", video_id.as_str());
     if let Some(video_info) = video_info {
-        if let Some(item) = video_info.items.first() {
-            push_video_info(&mut args, "title", item.snippet.title.as_str());
-            push_video_info(&mut args, "artist", item.snippet.channel_title.as_str());
-            push_video_info(&mut args, "description", item.snippet.description.as_str());
-            push_video_info(&mut args, "published_at", serde_json::to_string(&item.snippet.published_at).unwrap().as_str());
-            push_args(&mut args, &["-id3v2_version", "3"]);
-            let mut thumbnails: Vec<(&String, &Thumbnail)> = item.snippet.thumbnails.iter().collect();
-            thumbnails.sort_by_key(|(_, thumbnail)| thumbnail.width * thumbnail.height);
-        }
+        push_video_info(&mut args, "title", video_info.snippet.title.as_str());
+        push_video_info(&mut args, "artist", video_info.snippet.channel_title.as_str());
+        push_video_info(&mut args, "description", video_info.snippet.description.as_str());
+        push_video_info(&mut args, "published_at", serde_json::to_string(&video_info.snippet.published_at).unwrap().as_str());
+        push_args(&mut args, &["-id3v2_version", "3"]);
+        let mut thumbnails: Vec<(&String, &Thumbnail)> = video_info.snippet.thumbnails.iter().collect();
+        thumbnails.sort_by_key(|(_, thumbnail)| thumbnail.width * thumbnail.height);
     }
     if thumbnail.is_some() {
         push_args(&mut args, &["-disposition:0", "attached_pic"]);

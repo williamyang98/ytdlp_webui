@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import MetadataTable from "../components/MetadataTable.vue";
+import YoutubeVideoTable from "../components/YoutubeVideoTable.vue";
 import RequestBar from "../components/RequestBar.vue";
 import DownloadLink from "../components/DownloadLink.vue";
 import { providers } from "../providers/providers.ts";
@@ -15,8 +15,8 @@ const app = providers.app;
   <div class="divider my-1"></div>
   <DownloadLink :pending_request="app.pending_request"/>
 </div>
-<div v-if="app.metadata !== null" class="w-full">
+<div v-if="app.youtube_video !== null" class="w-full">
   <div class="divider my-1"></div>
-  <MetadataTable :metadata="app.metadata"/>
+  <YoutubeVideoTable :video="app.youtube_video"/>
 </div>
 </template>

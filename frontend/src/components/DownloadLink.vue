@@ -3,7 +3,7 @@ import { ref, computed, watch } from "vue";
 import TranscodeProgressBar from "./TranscodeProgressBar.vue";
 import DownloadProgressBar from "./DownloadProgressBar.vue";
 import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
-import { type Metadata } from "../api/youtube_api_schema.ts";
+import { type VideoItem } from "../api/youtube_api_schema.ts";
 import { sanitise_to_filepath } from "../utility/format.ts";
 import { providers } from "../providers/providers.ts";
 import { get_download_link } from "../api/api.ts";
@@ -13,7 +13,7 @@ const props = defineProps<{
 }>();
 
 const app = providers.app;
-const metadata = computed(() => app.metadata);
+const youtube_video = computed(() => app.youtube_video);
 
 const download_name = ref<string>("");
 
@@ -29,11 +29,9 @@ const transcode_state = computed(() => {
 
 const is_download_ready = computed(() => transcode_state.value?.worker_status === "finished");
 
-function set_download_filename_from_metadata(metadata: Metadata): boolean {
-  const item = metadata.items.at(0);
-  if (item === undefined) return false;
-  if (item.id !== props.pending_request.video_id) return false;
-  const filename = `${item.snippet.title}.${props.pending_request.audio_ext}`;
+function set_download_filename_from_youtube_video(youtube_video: VideoItem): boolean {
+  if (youtube_video.id !== props.pending_request.video_id) return false;
+  const filename = `${youtube_video.snippet.title}.${props.pending_request.audio_ext}`;
   const sanitised_filename = sanitise_to_filepath(filename);
   download_name.value = sanitised_filename;
   return true;
@@ -53,9 +51,9 @@ function download() {
   elem.click();
 }
 
-watch(metadata, (metadata) => {
-  if (metadata === null) return;
-  if (set_download_filename_from_metadata(metadata)) return;
+watch(youtube_video, (youtube_video) => {
+  if (youtube_video === null) return;
+  if (set_download_filename_from_youtube_video(youtube_video)) return;
   set_download_filename_from_transcode_key(props.pending_request);
 }, {
   immediate: true,

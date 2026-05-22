@@ -1,6 +1,6 @@
 import {
-  type Metadata as YoutubeMetadata,
-  MetadataSchema as YoutubeMetadataSchema,
+  type VideoItem,
+  VideoItemSchema,
 } from "./youtube_api_schema.ts";
 import {
   type VideoId,
@@ -104,11 +104,11 @@ export async function get_transcode_state(key: TranscodeKey): Promise<TranscodeS
   return state;
 }
 
-export async function get_metadata(key: DownloadKey): Promise<YoutubeMetadata> {
+export async function get_youtube_video(key: DownloadKey): Promise<VideoItem> {
   const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/video/${key}`);
   if (!response.ok) await handle_bad_response(response);
   const json = await response.json();
-  const state = YoutubeMetadataSchema.parse(json);
+  const state = VideoItemSchema.parse(json);
   return state;
 }
 

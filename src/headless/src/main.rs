@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     log::info!("download_worker: status={0:?}", download_worker.get_status());
     let video_info = if args.download_video_info {
         let video_info = app.get_youtube_video(&args.video_id).await?;
-        log::info!("youtube_video_info: title={0:?}", video_info.items.first().map(|e| e.snippet.title.as_str()));
+        log::info!("youtube_video_info: title={0:?}", video_info.snippet.title.as_str());
         Some(video_info)
     } else {
         None

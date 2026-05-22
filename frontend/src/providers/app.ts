@@ -6,7 +6,7 @@ import {
   type AudioExtension,
   is_worker_running,
 } from "../api/ytdlp_api_schema.ts";
-import { type Metadata } from "../api/youtube_api_schema.ts";
+import { type VideoItem } from "../api/youtube_api_schema.ts";
 import { reactive } from "vue";
 
 async function sleep(milliseconds: number) {
@@ -122,7 +122,7 @@ export class App {
   selected_download_key: DownloadKey | null;
   selected_transcode_key: TranscodeKey | null;
   pending_request: TranscodeKey | null;
-  metadata: Metadata | null;
+  youtube_video: VideoItem | null;
   download_workers: Partial<Record<string, DownloadWorker>>;
   transcode_workers: Partial<Record<string, TranscodeWorker>>;
   search_bar: SearchBar;
@@ -133,7 +133,7 @@ export class App {
     this.selected_download_key = null;
     this.selected_transcode_key = null;
     this.pending_request = null;
-    this.metadata = null;
+    this.youtube_video = null;
     this.transcode_workers = {};
     this.download_workers = {};
     this.search_bar = {
@@ -172,22 +172,22 @@ export class App {
     }
   }
 
-  async get_metadata(video_id: VideoId) {
-    const response = await api.get_metadata(video_id);
-    this.metadata = response;
+  async get_youtube_video(video_id: VideoId) {
+    const video = await api.get_youtube_video(video_id);
+    this.youtube_video = video;
   }
 
   select_download(key: DownloadKey) {
     this.selected_download_key = key;
     this.search_bar.url = key;
-    const _ = this.get_metadata(key);
+    const _ = this.get_youtube_video(key);
   }
 
   select_transcode(key: TranscodeKey) {
     this.selected_transcode_key = key;
     this.search_bar.url = key.video_id;
     this.search_bar.audio_ext = key.audio_ext;
-    const _ = this.get_metadata(key.video_id);
+    const _ = this.get_youtube_video(key.video_id);
   }
 
   async delete_download(key: DownloadKey) {
@@ -260,7 +260,7 @@ export class App {
         await this.get_transcode(key);
       }
     };
-    void this.get_metadata(key.video_id);
+    void this.get_youtube_video(key.video_id);
     void run_download();
     void run_transcode();
     return response;

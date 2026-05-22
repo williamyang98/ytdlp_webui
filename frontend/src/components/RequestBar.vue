@@ -38,7 +38,7 @@ watch(url, (url) => {
 
 watch(video_id, (video_id) => {
   if (video_id === null) return;
-  const _ = app.get_metadata(video_id);
+  const _ = app.get_youtube_video(video_id);
 });
 
 </script>

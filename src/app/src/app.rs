@@ -4,7 +4,7 @@ use crate::util::defer;
 use crate::worker_download::{DownloadWorker, DownloadWorkers};
 use crate::worker_transcode::{TranscodeWorker, TranscodeWorkers};
 use crate::youtube_api_cache::YoutubeApiCache;
-use youtube_api::{PaginatedResponse, PlaylistId, PlaylistItem, VideoId, VideoItem};
+use youtube_api::{PlaylistId, PlaylistItem, VideoId, VideoItem};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,7 +57,7 @@ impl App {
     }
 
 
-    pub fn start_transcode(&self, key: &TranscodeKey, video_info: Option<Arc<PaginatedResponse<VideoItem>>>) -> anyhow::Result<Arc<TranscodeWorker>> {
+    pub fn start_transcode(&self, key: &TranscodeKey, video_info: Option<Arc<VideoItem>>) -> anyhow::Result<Arc<TranscodeWorker>> {
         self.transcode_workers.start_worker(key, video_info)
     }
 
@@ -199,11 +199,11 @@ impl App {
         self.transcode_workers.get_worker(key)
     }
 
-    pub async fn get_youtube_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<PaginatedResponse<VideoItem>>> {
+    pub async fn get_youtube_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<VideoItem>> {
         self.youtube_api_cache.get_video(video_id).await
     }
 
-    pub async fn get_youtube_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<PaginatedResponse<PlaylistItem>>> {
+    pub async fn get_youtube_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<Vec<PlaylistItem>>> {
         self.youtube_api_cache.get_playlist(playlist_id).await
     }
 

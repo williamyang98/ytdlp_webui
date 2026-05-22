@@ -1,13 +1,14 @@
 import * as z from "zod";
 import { youtube_duration_string_to_dhms } from "../utility/format.ts";
 
-const ThumbnailSchema = z.object({
+// mirror to /src/youtube_api/src/schema.rs
+export const ThumbnailSchema = z.object({
   url: z.string(),
   width: z.int().gte(0),
   height: z.int().gte(0),
 });
 
-const ContentDetailsSchema = z.object({
+export const VideoContentDetailsSchema = z.object({
   duration: z.string().transform(youtube_duration_string_to_dhms),
   dimension: z.string(),
   definition: z.string(),
@@ -15,7 +16,7 @@ const ContentDetailsSchema = z.object({
   licensedContent: z.boolean(),
 });
 
-const SnippetSchema = z.object({
+export const VideoSnippetSchema = z.object({
   publishedAt: z.iso.datetime().transform(s => new Date(s)),
   channelId: z.string(),
   title: z.string(),
@@ -26,24 +27,12 @@ const SnippetSchema = z.object({
   categoryId: z.string(),
 });
 
-const ItemSchema = z.object({
+export const VideoItemSchema = z.object({
   id: z.string(),
   etag: z.string(),
   kind: z.string(),
-  snippet: SnippetSchema,
-  contentDetails: ContentDetailsSchema,
+  snippet: VideoSnippetSchema,
+  contentDetails: VideoContentDetailsSchema,
 });
 
-const PageInfoSchema = z.object({
-  totalResults: z.int(),
-  resultsPerPage: z.int(),
-});
-
-export const MetadataSchema = z.object({
-  kind: z.string(),
-  etag: z.string(),
-  items: ItemSchema.array().default([]),
-  pageInfo: PageInfoSchema,
-});
-
-export type Metadata = z.infer<typeof MetadataSchema>;
+export type VideoItem = z.infer<typeof VideoItemSchema>;

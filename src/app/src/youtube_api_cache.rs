@@ -1,6 +1,7 @@
 use dashmap::DashMap;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId, PaginatedResponse, ApiResponse};
+use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
@@ -10,8 +11,8 @@ use crate::app_config::AppConfig;
 
 pub struct YoutubeApiCache {
     api: Api,
-    videos_cache: DashMap<VideoId, Arc<PaginatedResponse<VideoItem>>>,
-    playlists_cache: DashMap<PlaylistId, Arc<PaginatedResponse<PlaylistItem>>>,
+    videos_cache: DashMap<VideoId, Arc<VideoItem>>,
+    playlists_cache: DashMap<PlaylistId, Arc<Vec<PlaylistItem>>>,
     videos_folder: PathBuf,
     playlists_folder: PathBuf,
 }
@@ -40,7 +41,7 @@ impl YoutubeApiCache {
         })
     }
 
-    pub async fn get_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<PaginatedResponse<VideoItem>>> {
+    pub async fn get_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<VideoItem>> {
         let filepath = self.videos_folder.join(format!("{0}.json", video_id.as_str()));
         self.cache_response(
             "video",
@@ -51,7 +52,7 @@ impl YoutubeApiCache {
         ).await
     }
 
-    pub async fn get_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<PaginatedResponse<PlaylistItem>>> {
+    pub async fn get_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<Vec<PlaylistItem>>> {
         let filepath = self.playlists_folder.join(format!("{0}.json", playlist_id.as_str()));
         self.cache_response(
             "playlist",
@@ -68,11 +69,11 @@ impl YoutubeApiCache {
         filepath: &Path,
         key: &K,
         cache: &DashMap<K, Arc<V>>,
-        api_fallback: impl AsyncFnOnce() -> anyhow::Result<ApiResponse<V>>,
+        api_fallback: impl AsyncFnOnce() -> anyhow::Result<V>,
     ) -> anyhow::Result<Arc<V>>
     where
         K: Hash + Eq + Clone,
-        V: DeserializeOwned,
+        V: DeserializeOwned + Serialize,
     {
         if let Some(response) = cache.get(key) {
             return Ok(response.clone());
@@ -103,8 +104,9 @@ impl YoutubeApiCache {
             },
         };
 
-        let write_to_filepath = |path: &Path, text: &str| -> anyhow::Result<()> {
+        let write_to_filepath = |path: &Path, value: &V| -> anyhow::Result<()> {
             let mut file = std::fs::File::create(path)?;
+            let text = serde_json::to_string(value)?;
             file.write_all(text.as_bytes())?;
             Ok(())
         };
@@ -113,13 +115,13 @@ impl YoutubeApiCache {
             Some(value) => value,
             None => {
                 // store entire response body onto disk, not just reserialising the deserialised value
-                let response = api_fallback().await?;
-                if let Err(err) = write_to_filepath(filepath, &response.text) {
+                let value = api_fallback().await?;
+                if let Err(err) = write_to_filepath(filepath, &value) {
                     log::error!("failed to cache {label} to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
                 } else {
                     log::debug!("successfully cached {label} to disk at {0}", filepath.to_string_lossy());
                 }
-                response.value
+                value
             },
         };
         let value = Arc::new(value);
