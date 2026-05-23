@@ -3,7 +3,7 @@ import { type TranscodeKey, type FfmpegRow } from "../api/ytdlp_api_schema.ts";
 import SortIcon from "./SortIcon.vue";
 import TranscodeProgressBar from "./TranscodeProgressBar.vue";
 import { FileMusic, FileTerminal, Trash2 } from 'lucide-vue-next';
-import { format_date } from "../utility/format.ts";
+import { format_datetime } from "../utility/format.ts";
 import { get_data_url } from "../api/api.ts";
 import { ref, computed } from "vue";
 import { providers } from "../providers/providers.ts";
@@ -102,7 +102,7 @@ const sorted_items = computed(() => {
 <template>
 <TranscodeProgressBar v-if="transcode_state" :state="transcode_state"/>
 <div class="w-full overflow-x-auto">
-  <table class="table table-pin-rows table-compact w-full">
+  <table class="table table-pin-rows table-extra-compact w-full">
     <colgroup>
       <col class="w-px"/>
       <col class="w-px"/>
@@ -165,7 +165,7 @@ const sorted_items = computed(() => {
           <th>{{ item.video_id }}</th>
           <td>{{ item.audio_ext }}</td>
           <td>{{ item.status }}</td>
-          <td>{{ format_date(item.unix_time) }}</td>
+          <td>{{ format_datetime(item.unix_time) }}</td>
           <td>
             <a v-if="item.audio_path" class="btn btn-sm px-1" :href="get_data_url(item.audio_path)">
               <FileMusic class="size-5"/>

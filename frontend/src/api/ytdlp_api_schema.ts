@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { type VideoId } from "./youtube_api_schema.ts";
 
 // https://zod.dev/api
 export const WorkerStatusSchema = z.enum(["queued", "running", "finished", "failed"]);
@@ -90,7 +91,6 @@ export type FfmpegRow = z.infer<typeof FfmpegRowSchema>;
 export type DeleteFileResult = z.infer<typeof DeleteFileResultSchema>;
 export type DeleteResponse = z.infer<typeof DeleteResponseSchema>;
 export type RequestTranscodeResponse = z.infer<typeof RequestTranscodeResponseSchema>;
-export type VideoId = string;
 export type DownloadKey = VideoId;
 export interface TranscodeKey {
   video_id: VideoId;

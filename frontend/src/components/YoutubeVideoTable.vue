@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { get_youtube_link } from "../api/api.ts";
+import { create_youtube_link } from "../utility/youtube_url.ts";
 import { type VideoItem } from "../api/youtube_api_schema.ts";
 import { convert_dhms_to_string, format_date } from "../utility/format.ts";
 
@@ -25,14 +25,15 @@ const thumbnail_link = computed(() => {
 });
 
 const youtube_link = computed(() => {
-  return get_youtube_link(props.video.id);
+  return create_youtube_link(props.video.id);
 });
 </script>
 
 <template>
-<table class="table table-pin-rows table-compact">
+<table class="table table-pin-rows table-extra-compact">
   <colgroup>
     <col class="w-px"/>
+    <col/>
   </colgroup>
   <tbody>
     <tr>
@@ -58,10 +59,14 @@ const youtube_link = computed(() => {
   </tbody>
 </table>
 <div v-if="thumbnail_link !== null" class="max-w-full">
-  <img :src="thumbnail_link.url" class="w-full max-w-lg"/>
+  <img :src="thumbnail_link.url" class="min-w-xs max-w-lg"/>
 </div>
-<div class="w-full max-h-100 overflow-y-auto overflow-x-hidden">
-  <span class="font-medium text-nowrap">Description</span>
-  <p class="text-sm whitespace-pre-wrap">{{ video.snippet.description }}</p>
-</div>
+<details class="collapse collapse-arrow border border-slate-300 p-2 mt-1" name="youtube-video-description" open>
+  <summary class="collapse-title font-semibold p-0 text-sm">Description</summary>
+  <div class="collapse-content p-0">
+    <div class="w-full max-h-50 overflow-y-auto overflow-x-hidden text-sm whitespace-pre-wrap">
+      {{ video.snippet.description }}
+    </div>
+  </div>
+</details>
 </template>

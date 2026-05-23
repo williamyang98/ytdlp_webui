@@ -73,9 +73,21 @@ watch(youtube_video, (youtube_video) => {
     </div>
     <button class="btn rounded-none rounded-r" :disabled="!is_download_ready" @click="download">Download</button>
   </div>
-  <b>Download</b>
-  <DownloadProgressBar :state="download_state"/>
-  <b>Transcode</b>
-  <TranscodeProgressBar :state="transcode_state"/>
+  <table class="table table-extra-compact table-sm mt-1">
+    <colgroup>
+      <col class="w-px"/>
+      <col class="w-full"/>
+    </colgroup>
+    <tbody>
+      <tr>
+        <td class="font-medium">Download</td>
+        <td><DownloadProgressBar :state="download_state"/></td>
+      </tr>
+      <tr>
+        <td class="font-medium">Transcode</td>
+        <td><TranscodeProgressBar :state="transcode_state"/></td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 </template>

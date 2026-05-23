@@ -43,3 +43,10 @@
 .btn {
   transition-duration: 0.02s;
 }
+
+.table.table-extra-compact {
+  :where(th, td) {
+    padding-inline: calc(var(--spacing)*1);
+    padding-block: calc(var(--spacing)*1);
+  }
+}

@@ -1,9 +1,12 @@
 import {
+  type VideoId,
+  type PlaylistId,
   type VideoItem,
+  type PlaylistItem,
   VideoItemSchema,
+  PlaylistItemArraySchema,
 } from "./youtube_api_schema.ts";
 import {
-  type VideoId,
   type DownloadKey,
   type TranscodeKey,
   type AudioExtension,
@@ -104,11 +107,19 @@ export async function get_transcode_state(key: TranscodeKey): Promise<TranscodeS
   return state;
 }
 
-export async function get_youtube_video(key: DownloadKey): Promise<VideoItem> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/video/${key}`);
+export async function get_youtube_video(id: VideoId): Promise<VideoItem> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/video/${id}`);
   if (!response.ok) await handle_bad_response(response);
   const json = await response.json();
   const state = VideoItemSchema.parse(json);
+  return state;
+}
+
+export async function get_youtube_playlist(id: PlaylistId): Promise<PlaylistItem[]> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/playlist/${id}`);
+  if (!response.ok) await handle_bad_response(response);
+  const json = await response.json();
+  const state = PlaylistItemArraySchema.parse(json);
   return state;
 }
 
@@ -116,11 +127,7 @@ export function get_data_url(relative_path: string): string {
   return `${BASE_URL}/data/${relative_path}`;
 }
 
-export function get_download_link(video_id: string, audio_ext: AudioExtension, name: string): string {
+export function get_download_link(video_id: VideoId, audio_ext: AudioExtension, name: string): string {
   const param_name = encodeURIComponent(name);
   return `${BASE_URL}/${API_URL}/get_download_link/${video_id}/${audio_ext}?name=${param_name}`;
-}
-
-export function get_youtube_link(video_id: VideoId): string {
-  return `https://youtube.com/watch?v=${video_id}`;
 }

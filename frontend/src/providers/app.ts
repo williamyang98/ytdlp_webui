@@ -1,13 +1,14 @@
 import * as api from "../api/api.ts";
 import {
   type YtdlpRow, type FfmpegRow,
-  type VideoId, type DownloadKey, type TranscodeKey,
+  type DownloadKey, type TranscodeKey,
   type TranscodeState, type DownloadState,
   type AudioExtension,
   is_worker_running,
 } from "../api/ytdlp_api_schema.ts";
-import { type VideoItem } from "../api/youtube_api_schema.ts";
-import { reactive } from "vue";
+import { type PlaylistId, type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
+import { computed, isReactive, reactive, watch } from "vue";
+import { create_youtube_link, create_youtube_playlist_link, parse_youtube_url, type YoutubeUrlParseResult } from "../utility/youtube_url.ts";
 
 async function sleep(milliseconds: number) {
   await new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -116,6 +117,11 @@ export interface SearchBar {
   audio_ext: AudioExtension;
 }
 
+export interface Playlist {
+  id: PlaylistId;
+  items: PlaylistItem[];
+}
+
 export class App {
   downloads: YtdlpRow[];
   transcodes: FfmpegRow[];
@@ -123,9 +129,12 @@ export class App {
   selected_transcode_key: TranscodeKey | null;
   pending_request: TranscodeKey | null;
   youtube_video: VideoItem | null;
+  youtube_playlist: Playlist | null;
   download_workers: Partial<Record<string, DownloadWorker>>;
   transcode_workers: Partial<Record<string, TranscodeWorker>>;
-  search_bar: SearchBar;
+  youtube_search_bar: SearchBar;
+  youtube_url_parse_result: YoutubeUrlParseResult;
+  is_mounted: boolean;
 
   constructor() {
     this.downloads = [];
@@ -134,12 +143,15 @@ export class App {
     this.selected_transcode_key = null;
     this.pending_request = null;
     this.youtube_video = null;
+    this.youtube_playlist = null;
     this.transcode_workers = {};
     this.download_workers = {};
-    this.search_bar = {
+    this.youtube_search_bar = {
       url: "",
       audio_ext: "mp3",
     };
+    this.youtube_url_parse_result = {};
+    this.is_mounted = false;
   }
 
   async get_downloads() {
@@ -177,17 +189,26 @@ export class App {
     this.youtube_video = video;
   }
 
+  async get_youtube_playlist(playlist_id: PlaylistId) {
+    const items = await api.get_youtube_playlist(playlist_id);
+    this.youtube_playlist = { id: playlist_id, items };
+  }
+
   select_download(key: DownloadKey) {
     this.selected_download_key = key;
-    this.search_bar.url = key;
+    this.youtube_search_bar.url = create_youtube_link(key);
     const _ = this.get_youtube_video(key);
   }
 
   select_transcode(key: TranscodeKey) {
     this.selected_transcode_key = key;
-    this.search_bar.url = key.video_id;
-    this.search_bar.audio_ext = key.audio_ext;
+    this.youtube_search_bar.url = create_youtube_link(key.video_id);
+    this.youtube_search_bar.audio_ext = key.audio_ext;
     const _ = this.get_youtube_video(key.video_id);
+  }
+
+  select_playlist_item(playlist_id: PlaylistId, video_id: VideoId) {
+    this.youtube_search_bar.url = create_youtube_playlist_link(playlist_id, video_id);
   }
 
   async delete_download(key: DownloadKey) {
@@ -234,10 +255,6 @@ export class App {
     return worker;
   }
 
-  clear_request() {
-    this.pending_request = null;
-  }
-
   async request_transcode(key: TranscodeKey) {
     const response = await api.request_transcode(key);
     this.pending_request = key;
@@ -267,6 +284,48 @@ export class App {
   }
 
   async on_mount() {
+    if (!isReactive(this)) {
+      console.error("Tried to mount non-reactive app instance");
+      return;
+    }
+    if (this.is_mounted) {
+      console.warn("Skipping attempt to remount app instance");
+      return;
+    }
+    this.is_mounted = true;
+
+
+    const url = computed(() => this.youtube_search_bar.url);
+    watch(url, (url) => {
+      // clear url
+      if (url.length === 0) {
+        this.youtube_url_parse_result = {};
+        this.youtube_video = null;
+        this.youtube_playlist = null;
+        this.pending_request = null;
+        return;
+      }
+      // attempt to parse url
+      const result = parse_youtube_url(url);
+      if (result.video_id !== undefined) {
+        if (result.video_id !== this.youtube_url_parse_result.video_id) {
+          this.pending_request = null;
+          void this.get_youtube_video(result.video_id);
+        }
+      } else {
+        this.youtube_video = null;
+        this.pending_request = null;
+      }
+      if (result.playlist_id !== undefined) {
+        if (result.playlist_id !== this.youtube_url_parse_result.playlist_id) {
+          void this.get_youtube_playlist(result.playlist_id);
+        }
+      } else {
+        this.youtube_playlist = null;
+      }
+      this.youtube_url_parse_result = result;
+    });
+
     await Promise.all([
       this.get_downloads(),
       this.get_transcodes(),

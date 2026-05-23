@@ -1,4 +1,14 @@
 export function format_date(date: Date): string {
+  const day = date.getDate();
+  const month = date.getMonth()+1; // zero indexed month
+  const year = date.getFullYear();
+
+  const s_month = String(month).padStart(2, '0');
+  const s_day = String(day).padStart(2, '0');
+  return `${year}/${s_month}/${s_day}`;
+}
+
+export function format_datetime(date: Date): string {
   const seconds = date.getSeconds();
   const minutes = date.getMinutes();
   const hours = date.getHours();
@@ -6,11 +16,11 @@ export function format_date(date: Date): string {
   const month = date.getMonth()+1; // zero indexed month
   const year = date.getFullYear();
 
-  const s_month = String(month).padStart(2,'0');
-  const s_day = String(day).padStart(2,'0');
-  const s_hours = String(hours).padStart(2,'0');
-  const s_minutes = String(minutes).padStart(2,'0');
-  const s_seconds = String(seconds).padStart(2,'0');
+  const s_month = String(month).padStart(2, '0');
+  const s_day = String(day).padStart(2, '0');
+  const s_hours = String(hours).padStart(2, '0');
+  const s_minutes = String(minutes).padStart(2, '0');
+  const s_seconds = String(seconds).padStart(2, '0');
   return `${year}/${s_month}/${s_day}-${s_hours}:${s_minutes}:${s_seconds}`;
 }
 
@@ -108,14 +118,4 @@ export function sanitise_to_filepath(x: string): string {
     .replace(RESERVED_REGEX, '')
     .replace(WIN32_RESERVED_REGEX, '')
     .replace(WIN32_TRAILING_REGEX, '');
-}
-
-const VIDEO_ID_REGEX = /(?:^.*(?:(?:youtu.be\/)|(?:v\/)|(?:\/u\/\w\/)|(?:embed\/)|(?:watch\?))\??v?=?)?([^#&?]*).*/;
-const VIDEO_ID_LENGTH = 11;
-export function extract_youtube_video_id(url: string): string | null {
-  const match = url.match(VIDEO_ID_REGEX);
-  if (!match) { return null; }
-  const id = match[1];
-  if (id.length !== VIDEO_ID_LENGTH) { return null; }
-  return id;
 }
