@@ -200,7 +200,7 @@ function select_playlist_item(row: Row) {
     </tr>
   </thead>
   <tbody>
-    <template v-for="row in sorted_rows" :key="row.video_id">
+    <template v-for="row in sorted_rows" :key="row.index">
       <tr
         class="hover:bg-base-300 cursor-pointer"
         :class="get_playlist_item_class(row)"
