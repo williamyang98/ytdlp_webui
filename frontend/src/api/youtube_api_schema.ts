@@ -8,6 +8,11 @@ function convert_video_id(id: string): VideoId {
   return id;
 }
 
+function into_option<T>(value: T | undefined | null): T | undefined {
+  if (value === null || value === undefined) return undefined;
+  return value;
+}
+
 // mirror to /src/youtube_api/src/schema.rs
 export const ThumbnailSchema = z.object({
   url: z.string(),
@@ -28,7 +33,7 @@ export const VideoSnippetSchema = z.object({
   channelId: z.string(),
   title: z.string(),
   description: z.string(),
-  thumbnails: z.record(z.string(), ThumbnailSchema.optional()),
+  thumbnails: z.partialRecord(z.string(), ThumbnailSchema),
   channelTitle: z.string(),
   tags: z.string().array(),
   categoryId: z.string(),
@@ -44,7 +49,7 @@ export const VideoItemSchema = z.object({
 
 export const PlaylistContentDetailsSchema = z.object({
   videoId: z.string().transform(convert_video_id),
-  videoPublishedAt: z.iso.datetime().transform(s => new Date(s)),
+  videoPublishedAt: z.iso.datetime().transform(s => new Date(s)).nullish().transform(into_option),
 });
 
 export const PlaylistItemSchema = z.object({

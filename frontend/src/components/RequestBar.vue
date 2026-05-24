@@ -7,7 +7,7 @@ import { Search } from "lucide-vue-next";
 const app = providers.app;
 const request_available = computed(() => {
   const result = app.youtube_url_parse_result;
-  return result.video_id !== undefined;
+  return result.video_id !== undefined || result.playlist_id !== undefined;
 });
 
 const error_message = computed(() => {

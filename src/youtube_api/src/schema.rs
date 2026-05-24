@@ -223,7 +223,7 @@ pub struct PlaylistItem {
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistContentDetailsPart {
     pub video_id: VideoId,
-    pub video_published_at: DateTimeRfc3339,
+    pub video_published_at: Option<DateTimeRfc3339>,
     #[serde(flatten)] _extras: Extra,
 }
 
