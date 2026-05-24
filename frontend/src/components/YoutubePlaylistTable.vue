@@ -21,6 +21,7 @@ class Row {
   video_id: VideoId;
   playlist_item: PlaylistItem;
   video_item: VideoItem | null;
+  is_fetch_error: boolean;
   promise: Promise<void> | null;
 
   constructor(index: number, item: PlaylistItem) {
@@ -28,6 +29,7 @@ class Row {
     this.video_id = item.contentDetails.videoId;
     this.playlist_item = item;
     this.video_item = null;
+    this.is_fetch_error = false;
     this.promise = null;
   }
 
@@ -36,8 +38,14 @@ class Row {
   }
 
   async _fetch() {
-    const video_item = await api.get_youtube_video(this.video_id);
-    this.video_item = video_item;
+    try {
+      this.video_item = await api.get_youtube_video(this.video_id);
+      this.is_fetch_error = false;
+    } catch (error) {
+      console.error(error);
+      this.video_item = null;
+      this.is_fetch_error = true;
+    }
   }
 }
 
@@ -208,26 +216,19 @@ function select_playlist_item(row: Row) {
       >
         <th>{{ row.index+1 }}</th>
         <td>{{ row.video_id }}</td>
-        <td>
-          <template v-if="row.video_item !== null">{{ row.video_item.snippet.title }}</template>
-          <template v-else>...</template>
-        </td>
-        <td>
-          <template v-if="row.video_item !== null">{{ convert_dhms_to_string(row.video_item.contentDetails.duration) }}</template>
-          <template v-else>...</template>
-        </td>
-        <td>
-          <span v-if="row.video_item !== null" class="text-nowrap">{{ row.video_item.snippet.channelTitle }}</span>
-          <template v-else>...</template>
-        </td>
-        <td>
-          <template v-if="row.video_item !== null">{{ format_date(row.video_item.snippet.publishedAt) }}</template>
-          <template v-else>...</template>
-        </td>
-        <td>
-          <a v-if="row.video_item !== null" class="link link-primary" :href="create_youtube_playlist_link(playlist.id, row.video_id)">Link</a>
-          <template v-else>...</template>
-        </td>
+        <template v-if="row.video_item !== null">
+          <td>{{ row.video_item.snippet.title }}</td>
+          <td>{{ convert_dhms_to_string(row.video_item.contentDetails.duration) }}</td>
+          <td><span class="text-nowrap">{{ row.video_item.snippet.channelTitle }}</span></td>
+          <td>{{ format_date(row.video_item.snippet.publishedAt) }}</td>
+          <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist.id, row.video_id)">Link</a></td>
+        </template>
+        <template v-else-if="row.is_fetch_error">
+          <td colspan="5"><span class="text-nowrap text-error font-medium">Error fetching video information</span></td>
+        </template>
+        <template v-else>
+          <td colspan="5"><span class="text-nowrap font-light">Loading ...</span></td>
+        </template>
       </tr>
     </template>
   </tbody>
