@@ -21,7 +21,7 @@ watch(() => current_route.fullPath, () => {
 watch(() => current_route.name, (name) => {
   const route_name = name?.toString();
   if (route_name === undefined) return;
-  document.title = route_name;
+  document.title = `ytdlp - ${route_name}`;
 });
 
 </script>
