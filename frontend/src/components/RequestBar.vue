@@ -7,11 +7,12 @@ import { Search } from "lucide-vue-next";
 const app = providers.app;
 const request_available = computed(() => {
   const result = app.youtube_url_parse_result;
-  return result.video_id !== undefined || result.playlist_id !== undefined;
+  return result.video_id !== undefined;
 });
 
 const error_message = computed(() => {
-  if (request_available.value) return null;
+  const result = app.youtube_url_parse_result;
+  if (result.video_id !== undefined || result.playlist_id !== undefined) return null;
   if (app.youtube_search_bar.url.length > 0) return "Invalid Youtube URL";
   return "Please provide url";
 });
