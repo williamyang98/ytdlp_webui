@@ -29,7 +29,7 @@ const width = computed((): number => {
 
 const colour = computed((): string => {
   const state = props.state;
-  if (state === null) return "Pending";
+  if (state === null) return "";
   switch (state.worker_status) {
     case "finished": return "bg-success";
     case "failed": return "bg-error";
@@ -41,11 +41,11 @@ const colour = computed((): string => {
 
 const status = computed((): string => {
   const state = props.state;
-  if (state === null) return "Waiting";
+  if (state === null) return "No Download";
   switch (state.worker_status) {
-    case "finished": return state.file_cached ? "Finished (cached)" : "Finished";
-    case "failed": return "Failed";
-    case "queued": return "Queued";
+    case "finished": return state.file_cached ? "Download Finished (cached)" : "Download Finished";
+    case "failed": return "Download Failed";
+    case "queued": return "Download Queued";
     case "running": break;
   }
   let total_bytes = state.total_bytes;
@@ -55,9 +55,9 @@ const status = computed((): string => {
     elapsed_bytes = Math.max(elapsed_bytes, 0);
     const { value: elapsed_value, prefix: elapsed_suffix } = convert_to_short_standard_prefix(elapsed_bytes);
     const { value: total_value, prefix: total_suffix } = convert_to_short_standard_prefix(total_bytes);
-    return `${elapsed_value.toFixed(2)}${elapsed_suffix}B/${total_value.toFixed(2)}${total_suffix}B`;
+    return `Downloading ${elapsed_value.toFixed(2)}${elapsed_suffix}B/${total_value.toFixed(2)}${total_suffix}B`;
   }
-  return "Running";
+  return "Downloading";
 });
 
 const subtitle = computed((): string | null => {
@@ -98,14 +98,14 @@ const subtitle_colour = computed(() => props.state?.worker_status === "failed" ?
 <div class="w-full">
   <div class="rounded-sm w-full h-[2.0rem] bg-slate-300 border-1 border-slate-300 border-sm">
     <div
-      class="rounded-sm h-full text-center ease-width"
+      class="rounded-sm h-full ease-width grid place-items-center"
       :class="`${colour}`"
       :style="{ width: `${(width*100).toFixed(2)}%` }"
     >
-      <span class="align-middle px-2 font-medium">{{ status }}</span>
+      <span class="text-center align-middle px-2 font-medium text-sm text-nowrap">{{ status }}</span>
     </div>
   </div>
-  <p v-if="subtitle !== null" class="label pl-1" :class="subtitle_colour">{{ subtitle }}</p>
+  <p v-if="subtitle !== null" class="label text-sm text-nowrap px-1" :class="subtitle_colour">{{ subtitle }}</p>
 </div>
 </template>
 

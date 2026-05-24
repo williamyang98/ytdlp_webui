@@ -29,7 +29,7 @@ const width = computed((): number => {
 
 const colour = computed((): string => {
   const state = props.state;
-  if (state === null) return "Pending";
+  if (state === null) return "";
   switch (state.worker_status) {
     case "finished": return "bg-success";
     case "failed": return "bg-error";
@@ -41,11 +41,11 @@ const colour = computed((): string => {
 
 const status = computed((): string => {
   const state = props.state;
-  if (state === null) return "Waiting";
+  if (state === null) return "No Transcode";
   switch (state.worker_status) {
-    case "finished": return state.file_cached ? "Finished (cached)" : "Finished";
-    case "failed": return "Failed";
-    case "queued": return "Queued";
+    case "finished": return state.file_cached ? "Transcode Finished (cached)" : "Transcode Finished";
+    case "failed": return "Transcode Failed";
+    case "queued": return "Transcode Queued";
     case "running": break;
   }
   const total_milliseconds = state.source_duration_milliseconds;
@@ -55,9 +55,9 @@ const status = computed((): string => {
     const total_dhms = convert_seconds_to_dhms(total_milliseconds/1000);
     const elapsed_string = convert_dhms_to_string(elapsed_dhms);
     const total_string = convert_dhms_to_string(total_dhms);
-    return `${elapsed_string}/${total_string}`;
+    return `Transcoding ${elapsed_string}/${total_string}`;
   }
-  return "Running";
+  return "Transcoding";
 });
 
 const subtitle = ref<string | null>(null);
@@ -139,14 +139,14 @@ const subtitle_colour = computed(() => props.state?.worker_status === "failed" ?
 <div class="w-full">
   <div class="rounded-sm w-full h-[2.0rem] bg-slate-300 border-1 border-slate-300 border-sm">
     <div
-      class="rounded-sm h-full text-center ease-width"
+      class="rounded-sm h-full ease-width grid place-items-center"
       :class="`${colour}`"
       :style="{ width: `${(width*100).toFixed(2)}%` }"
     >
-      <span class="align-middle px-2 font-medium">{{ status }}</span>
+      <span class="text-center align-middle px-2 font-medium text-sm text-nowrap">{{ status }}</span>
     </div>
   </div>
-  <p v-if="subtitle !== null" class="label pl-1" :class="subtitle_colour">{{ subtitle }}</p>
+  <p v-if="subtitle !== null" class="label text-sm text-nowrap px-1" :class="subtitle_colour">{{ subtitle }}</p>
 </div>
 </template>
 
