@@ -14,11 +14,11 @@ const app = providers.app;
   <RequestBar/>
 </div>
 <div v-if="app.pending_request !== null" class="w-full">
-  <div class="divider my-1"></div>
+  <div class="divider my-0.5"></div>
   <DownloadLink :pending_request="app.pending_request"/>
 </div>
 <div v-if="app.youtube_video !== null" class="w-full">
-  <div class="divider my-1"></div>
+  <div class="divider my-0.5"></div>
   <div class="w-full flex justify-between px-1">
     <div class="font-medium">Video Information</div>
     <button class="btn btn-sm px-1" @click="app.get_youtube_video(app.youtube_video.id, true)"><RefreshCwIcon class="size-5"/></button>
@@ -26,7 +26,7 @@ const app = providers.app;
   <YoutubeVideoTable :video="app.youtube_video"/>
 </div>
 <div v-if="app.youtube_playlist !== null" class="w-full">
-  <div class="divider my-1"></div>
+  <div class="divider my-0.5"></div>
   <div class="w-full flex justify-between px-1">
     <div class="font-medium">Video Playlist ({{ app.youtube_playlist.items.length }})</div>
     <button class="btn btn-sm px-1" @click="app.get_youtube_playlist(app.youtube_playlist.id, true)"><RefreshCwIcon class="size-5"/></button>
