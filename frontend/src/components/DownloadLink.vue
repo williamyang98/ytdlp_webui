@@ -7,6 +7,7 @@ import { type VideoItem } from "../api/youtube_api_schema.ts";
 import { sanitise_to_filepath } from "../utility/format.ts";
 import { providers } from "../providers/providers.ts";
 import { get_download_link } from "../api/api.ts";
+import { HardDriveDownloadIcon } from "lucide-vue-next";
 
 const props = defineProps<{
   pending_request: TranscodeKey,
@@ -62,32 +63,21 @@ watch(youtube_video, (youtube_video) => {
 </script>
 
 <template>
-<div class="w-full">
+<div class="w-full flex flex-col gap-y-1">
   <div class="flex w-full">
     <div class="grow">
-      <input
-        class="input rounded-none rounded-l w-full"
-        placeholder="Filename"
-        v-model="download_name" type="text"
-      />
+      <label class="input rounded-none rounded-l w-full">
+        <HardDriveDownloadIcon class="text-base-content/50 size-5"/>
+        <input
+          class="search w-full"
+          placeholder="Filename"
+          v-model="download_name" type="text"
+        />
+      </label>
     </div>
     <button class="btn rounded-none rounded-r" :disabled="!is_download_ready" @click="download">Download</button>
   </div>
-  <table class="table table-extra-compact table-sm mt-1">
-    <colgroup>
-      <col class="w-px"/>
-      <col class="w-full"/>
-    </colgroup>
-    <tbody>
-      <tr>
-        <td class="font-medium">Download</td>
-        <td><DownloadProgressBar :state="download_state"/></td>
-      </tr>
-      <tr>
-        <td class="font-medium">Transcode</td>
-        <td><TranscodeProgressBar :state="transcode_state"/></td>
-      </tr>
-    </tbody>
-  </table>
+  <DownloadProgressBar :state="download_state"/>
+  <TranscodeProgressBar :state="transcode_state"/>
 </div>
 </template>
