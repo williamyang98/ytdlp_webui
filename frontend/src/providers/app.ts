@@ -184,13 +184,13 @@ export class App {
     }
   }
 
-  async get_youtube_video(video_id: VideoId) {
-    const video = await api.get_youtube_video(video_id);
+  async get_youtube_video(video_id: VideoId, force_refresh?: boolean) {
+    const video = await api.get_youtube_video(video_id, force_refresh);
     this.youtube_video = video;
   }
 
-  async get_youtube_playlist(playlist_id: PlaylistId) {
-    const items = await api.get_youtube_playlist(playlist_id);
+  async get_youtube_playlist(playlist_id: PlaylistId, force_refresh?: boolean) {
+    const items = await api.get_youtube_playlist(playlist_id, force_refresh);
     this.youtube_playlist = { id: playlist_id, items };
   }
 

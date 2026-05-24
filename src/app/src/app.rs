@@ -199,12 +199,12 @@ impl App {
         self.transcode_workers.get_worker(key)
     }
 
-    pub async fn get_youtube_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<VideoItem>> {
-        self.youtube_api_cache.get_video(video_id).await
+    pub async fn get_youtube_video(&self, video_id: &VideoId, force_refresh: bool) -> anyhow::Result<Arc<VideoItem>> {
+        self.youtube_api_cache.get_video(video_id, force_refresh).await
     }
 
-    pub async fn get_youtube_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<Vec<PlaylistItem>>> {
-        self.youtube_api_cache.get_playlist(playlist_id).await
+    pub async fn get_youtube_playlist(&self, playlist_id: &PlaylistId, force_refresh: bool) -> anyhow::Result<Arc<Vec<PlaylistItem>>> {
+        self.youtube_api_cache.get_playlist(playlist_id, force_refresh).await
     }
 
     pub fn get_download_abspath(&self, key: &TranscodeKey) -> anyhow::Result<Option<PathBuf>> {

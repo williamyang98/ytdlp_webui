@@ -41,23 +41,25 @@ impl YoutubeApiCache {
         })
     }
 
-    pub async fn get_video(&self, video_id: &VideoId) -> anyhow::Result<Arc<VideoItem>> {
+    pub async fn get_video(&self, video_id: &VideoId, force_refresh: bool) -> anyhow::Result<Arc<VideoItem>> {
         let filepath = self.videos_folder.join(format!("{0}.json", video_id.as_str()));
         self.cache_response(
             "video",
             &filepath,
             video_id,
+            force_refresh,
             &self.videos_cache,
             async || self.api.get_video(video_id).await,
         ).await
     }
 
-    pub async fn get_playlist(&self, playlist_id: &PlaylistId) -> anyhow::Result<Arc<Vec<PlaylistItem>>> {
+    pub async fn get_playlist(&self, playlist_id: &PlaylistId, force_refresh: bool) -> anyhow::Result<Arc<Vec<PlaylistItem>>> {
         let filepath = self.playlists_folder.join(format!("{0}.json", playlist_id.as_str()));
         self.cache_response(
             "playlist",
             &filepath,
             playlist_id,
+            force_refresh,
             &self.playlists_cache,
             async || self.api.get_playlist(playlist_id).await,
         ).await
@@ -68,6 +70,7 @@ impl YoutubeApiCache {
         label: &'static str,
         filepath: &Path,
         key: &K,
+        force_refresh: bool,
         cache: &DashMap<K, Arc<V>>,
         api_fallback: impl AsyncFnOnce() -> anyhow::Result<V>,
     ) -> anyhow::Result<Arc<V>>
@@ -82,6 +85,10 @@ impl YoutubeApiCache {
         // load from filepath
         let load_from_filepath = |path: &Path| -> anyhow::Result<Option<V>> {
             if !path.exists() {
+                return Ok(None);
+            }
+            if force_refresh {
+                log::debug!("{label} force refresh cache ignoring existing file on disk: {0}", path.to_string_lossy());
                 return Ok(None);
             }
             let data = std::fs::read_to_string(path)?;

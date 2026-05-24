@@ -85,7 +85,7 @@ pub async fn request_transcode(req: HttpRequest, path: web::Path<(String, String
         .map_err(ApiError::internal_server)?
         .get_status();
     // download video info
-    let video_info = app.get_youtube_video(&video_id).await;
+    let video_info = app.get_youtube_video(&video_id, false).await;
     let video_info = match video_info {
         Ok(video_info) => Some(video_info),
         Err(err) => {
@@ -237,21 +237,28 @@ pub async fn get_download_link(
     Ok(attachment)
 }
 
+#[derive(Deserialize)]
+struct YoutubeApiParams {
+    force_refresh: Option<bool>,
+}
+
 #[actix_web::get("/youtube_api/video/{video_id}")]
-pub async fn get_youtube_video(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+pub async fn get_youtube_video(req: HttpRequest, path: web::Path<String>, params: web::Query<YoutubeApiParams>) -> actix_web::Result<HttpResponse> {
     let video_id = path.into_inner();
     let video_id: VideoId = video_id.as_str().try_into().map_err(|e| ApiError::invalid_video_id(video_id, e))?;
     let app = req.app_data::<Arc<App>>().unwrap().clone();
-    let video_info = app.get_youtube_video(&video_id).await.map_err(ApiError::internal_server)?;
+    let force_refresh = params.force_refresh.unwrap_or(false);
+    let video_info = app.get_youtube_video(&video_id, force_refresh).await.map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(video_info.as_ref()))
 }
 
 #[actix_web::get("/youtube_api/playlist/{playlist_id}")]
-pub async fn get_youtube_playlist(req: HttpRequest, path: web::Path<String>) -> actix_web::Result<HttpResponse> {
+pub async fn get_youtube_playlist(req: HttpRequest, path: web::Path<String>, params: web::Query<YoutubeApiParams>) -> actix_web::Result<HttpResponse> {
     let playlist_id = path.into_inner();
     let playlist_id: PlaylistId = playlist_id.as_str().try_into().map_err(|e| ApiError::invalid_playlist_id(playlist_id, e))?;
     let app = req.app_data::<Arc<App>>().unwrap().clone();
-    let playlist_info = app.get_youtube_playlist(&playlist_id).await.map_err(ApiError::internal_server)?;
+    let force_refresh = params.force_refresh.unwrap_or(false);
+    let playlist_info = app.get_youtube_playlist(&playlist_id, force_refresh).await.map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(playlist_info.as_ref()))
 }
 

@@ -107,16 +107,20 @@ export async function get_transcode_state(key: TranscodeKey): Promise<TranscodeS
   return state;
 }
 
-export async function get_youtube_video(id: VideoId): Promise<VideoItem> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/video/${id}`);
+export async function get_youtube_video(id: VideoId, force_refresh?: boolean): Promise<VideoItem> {
+  let url = `${BASE_URL}/${API_URL}/youtube_api/video/${id}`;
+  if (force_refresh === true) url += "?force_refresh=true";
+  const response = await fetch(url);
   if (!response.ok) await handle_bad_response(response);
   const json = await response.json();
   const state = VideoItemSchema.parse(json);
   return state;
 }
 
-export async function get_youtube_playlist(id: PlaylistId): Promise<PlaylistItem[]> {
-  const response = await fetch(`${BASE_URL}/${API_URL}/youtube_api/playlist/${id}`);
+export async function get_youtube_playlist(id: PlaylistId, force_refresh?: boolean): Promise<PlaylistItem[]> {
+  let url = `${BASE_URL}/${API_URL}/youtube_api/playlist/${id}`;
+  if (force_refresh === true) url += "?force_refresh=true";
+  const response = await fetch(url);
   if (!response.ok) await handle_bad_response(response);
   const json = await response.json();
   const state = PlaylistItemArraySchema.parse(json);
