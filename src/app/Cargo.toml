@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-web = { workspace = true }
+async-lock = { workspace = true }
 anyhow = { workspace = true }
 bytemuck = { workspace = true }
 dashmap = { workspace = true }

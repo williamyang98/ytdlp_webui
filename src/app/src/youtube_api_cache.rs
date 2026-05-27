@@ -4,15 +4,19 @@ use serde::de::DeserializeOwned;
 use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId};
 use std::hash::Hash;
 use std::sync::Arc;
+use async_lock::Mutex;
 use std::path::{Path, PathBuf};
 use std::io::Write;
 use anyhow::Context;
 use crate::app_config::AppConfig;
 
+// shared handle and shared value with mutex to protect on disk persistent cache
+type Cache<K,V> = DashMap<K, Arc<Mutex<Option<Arc<V>>>>>;
+
 pub struct YoutubeApiCache {
     api: Api,
-    videos_cache: DashMap<VideoId, Arc<VideoItem>>,
-    playlists_cache: DashMap<PlaylistId, Arc<Vec<PlaylistItem>>>,
+    videos_cache: Cache<VideoId, VideoItem>,
+    playlists_cache: Cache<PlaylistId, Vec<PlaylistItem>>,
     videos_folder: PathBuf,
     playlists_folder: PathBuf,
 }
@@ -71,19 +75,28 @@ impl YoutubeApiCache {
         filepath: &Path,
         key: &K,
         force_refresh: bool,
-        cache: &DashMap<K, Arc<V>>,
+        cache: &Cache<K,V>,
         api_fallback: impl AsyncFnOnce() -> anyhow::Result<V>,
     ) -> anyhow::Result<Arc<V>>
     where
         K: Hash + Eq + Clone,
         V: DeserializeOwned + Serialize,
     {
-        if let Some(response) = cache.get(key) {
-            return Ok(response.clone());
+        let cache_entry_lock = cache
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .clone();
+
+        let mut cache_entry = cache_entry_lock.lock().await;
+
+        if !force_refresh {
+            if let Some(response) = cache_entry.as_ref() {
+                return Ok(response.clone());
+            }
         }
 
         // load from filepath
-        let load_from_filepath = |path: &Path| -> anyhow::Result<Option<V>> {
+        let load_from_filepath = async |path: &Path| -> anyhow::Result<Option<V>> {
             if !path.exists() {
                 return Ok(None);
             }
@@ -91,12 +104,13 @@ impl YoutubeApiCache {
                 log::debug!("{label} force refresh cache ignoring existing file on disk: {0}", path.to_string_lossy());
                 return Ok(None);
             }
-            let data = std::fs::read_to_string(path)?;
+            let path = path.to_owned();
+            let data = actix_web::web::block(move || std::fs::read_to_string(path)).await??;
             let response: V = serde_json::from_str(data.as_str())?;
             Ok(Some(response))
         };
 
-        let value: Option<V> = match load_from_filepath(filepath) {
+        let value: Option<V> = match load_from_filepath(filepath).await {
             Ok(None) => {
                 log::debug!("{label} cache miss from disk: {0}", filepath.to_string_lossy());
                 None
@@ -111,8 +125,9 @@ impl YoutubeApiCache {
             },
         };
 
-        let write_to_filepath = |path: &Path, value: &V| -> anyhow::Result<()> {
-            let mut file = std::fs::File::create(path)?;
+        let write_to_filepath = async |path: &Path, value: &V| -> anyhow::Result<()> {
+            let path = path.to_owned();
+            let mut file = actix_web::web::block(move || std::fs::File::create(path)).await??;
             let text = serde_json::to_string(value)?;
             file.write_all(text.as_bytes())?;
             Ok(())
@@ -123,7 +138,7 @@ impl YoutubeApiCache {
             None => {
                 // store entire response body onto disk, not just reserialising the deserialised value
                 let value = api_fallback().await?;
-                if let Err(err) = write_to_filepath(filepath, &value) {
+                if let Err(err) = write_to_filepath(filepath, &value).await {
                     log::error!("failed to cache {label} to disk at {0}: {1:?}", filepath.to_string_lossy(), err);
                 } else {
                     log::debug!("successfully cached {label} to disk at {0}", filepath.to_string_lossy());
@@ -132,7 +147,7 @@ impl YoutubeApiCache {
             },
         };
         let value = Arc::new(value);
-        cache.insert(key.clone(), value.clone());
+        *cache_entry = Some(value.clone());
         Ok(value)
     }
 }

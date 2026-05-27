@@ -6,6 +6,7 @@ members = ["src/*"]
 actix-cors = { version = "0.7.1" }
 actix-files = { version = "0.6.6" }
 actix-web = { version = "4.8.0" }
+async-lock = { version = "3.4.2" }
 anyhow = { version = "1.0.102" }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 clap = { version = "4.5.4", features = ["derive"] }
