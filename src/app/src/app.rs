@@ -10,12 +10,34 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use threadpool::ThreadPool;
 
+pub struct AppThreadPool {
+    pub downloads_worker: Arc<ThreadPool>,
+    pub downloads_stdout: Arc<ThreadPool>,
+    pub downloads_stderr: Arc<ThreadPool>,
+    pub transcodes_worker: Arc<ThreadPool>,
+    pub transcodes_stdout: Arc<ThreadPool>,
+    pub transcodes_stderr: Arc<ThreadPool>,
+}
+
+impl AppThreadPool {
+    pub fn new(size: usize) -> Self {
+        let create = || Arc::new(ThreadPool::new(size));
+        Self {
+            downloads_worker: create(),
+            downloads_stdout: create(),
+            downloads_stderr: create(),
+            transcodes_worker: create(),
+            transcodes_stdout: create(),
+            transcodes_stderr: create(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct App {
     app_config: Arc<AppConfig>,
     database: Arc<Database>,
-    _threadpool: Arc<ThreadPool>,
+    _threadpool: Arc<AppThreadPool>,
     transcode_workers: Arc<TranscodeWorkers>,
     download_workers: Arc<DownloadWorkers>,
     youtube_api_cache: Arc<YoutubeApiCache>
@@ -42,7 +64,7 @@ impl App {
         let database = Arc::new(database);
         database.connect()?.run_pending_migrations();
 
-        let threadpool = Arc::new(ThreadPool::new(app_config.total_transcode_threads));
+        let threadpool = Arc::new(AppThreadPool::new(app_config.total_transcode_threads));
         let download_workers = Arc::new(DownloadWorkers::new(database.clone(), threadpool.clone(), app_config.clone()));
         let transcode_workers = Arc::new(TranscodeWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), download_workers.clone()));
         let youtube_api_cache = Arc::new(YoutubeApiCache::new(app_config.clone())?);

@@ -1,3 +1,4 @@
+use crate::app::AppThreadPool;
 use crate::app_config::AppConfig;
 use crate::database::{Database, WorkerStatus};
 use crate::util::get_unix_time;
@@ -11,7 +12,6 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
-use threadpool::ThreadPool;
 use uuid::Uuid;
 use youtube_api::VideoId;
 
@@ -182,13 +182,13 @@ impl ProcessPipeHandler for YtdlpStderrHandler {
 
 pub struct DownloadWorkers {
     database: Arc<Database>,
-    threadpool: Arc<ThreadPool>,
+    threadpool: Arc<AppThreadPool>,
     app_config: Arc<AppConfig>,
     cache: DashMap<VideoId, Arc<DownloadWorker>>,
 }
 
 impl DownloadWorkers {
-    pub fn new(database: Arc<Database>, threadpool: Arc<ThreadPool>, app_config: Arc<AppConfig>) -> Self {
+    pub fn new(database: Arc<Database>, threadpool: Arc<AppThreadPool>, app_config: Arc<AppConfig>) -> Self {
         Self {
             database,
             threadpool,
@@ -255,7 +255,7 @@ impl DownloadWorkers {
             move || -> anyhow::Result<()> {
                 // setup process
                 let output_dirpath = app_config.downloads_folder.join(video_id.as_str());
-                let mut process = ProcessWorker::new(threadpool.clone(), &output_dirpath);
+                let mut process = ProcessWorker::new(threadpool.downloads_stdout.clone(), threadpool.downloads_stderr.clone(), &output_dirpath);
                 process.label = Some(format!("download_{0}", video_id.as_str()));
                 let command = create_download_command(&video_id, &output_dirpath, &app_config)?;
                 let stdout_handler = Box::new(YtdlpStdoutHandler::new(worker.clone()));
@@ -358,7 +358,7 @@ impl DownloadWorkers {
             }
         };
 
-        self.threadpool.execute(move || {
+        self.threadpool.downloads_worker.execute(move || {
             if let Err(err) = outer_runner() {
                 log::error!("Runner failed with: {0}", err);
             }

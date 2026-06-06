@@ -1,3 +1,4 @@
+use crate::app::AppThreadPool;
 use crate::app_config::AppConfig;
 use crate::database::{TranscodeKey, Database, WorkerStatus};
 use crate::ffmpeg;
@@ -8,7 +9,6 @@ use youtube_api::VideoItem;
 use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
-use threadpool::ThreadPool;
 use anyhow::Context;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -169,7 +169,7 @@ impl ProcessPipeHandler for FfmpegStderrHandler {
 
 pub struct TranscodeWorkers {
     database: Arc<Database>,
-    threadpool: Arc<ThreadPool>,
+    threadpool: Arc<AppThreadPool>,
     app_config: Arc<AppConfig>,
     download_workers: Arc<DownloadWorkers>,
     cache: DashMap<TranscodeKey, Arc<TranscodeWorker>>,
@@ -178,7 +178,7 @@ pub struct TranscodeWorkers {
 impl TranscodeWorkers {
     pub fn new(
         database: Arc<Database>,
-        threadpool: Arc<ThreadPool>,
+        threadpool: Arc<AppThreadPool>,
         app_config: Arc<AppConfig>,
         download_workers: Arc<DownloadWorkers>,
     ) -> Self {
@@ -289,7 +289,7 @@ impl TranscodeWorkers {
                 let relative_output_filepath = app_config.get_relative_data_path(&output_filepath)
                     .with_context(|| format!("Failed to get relative output filepath from: {0}", output_filepath.to_string_lossy()))?;
                 // setup process
-                let mut process = ProcessWorker::new(threadpool.clone(), &output_dirpath);
+                let mut process = ProcessWorker::new(threadpool.transcodes_stdout.clone(), threadpool.transcodes_stderr.clone(), &output_dirpath);
                 let command = create_transcode_command(&key, &input_filepath, &output_filepath, video_info.as_deref(), &app_config)?;
                 process.label = Some(format!("transcode_{0}", key.as_str()));
                 let stderr_handler = FfmpegStderrHandler::new(worker.clone());
@@ -353,7 +353,7 @@ impl TranscodeWorkers {
                 Ok(())
             }
         };
-        self.threadpool.execute(move || {
+        self.threadpool.transcodes_worker.execute(move || {
             if let Err(err) = outer_runner() {
                 log::error!("Runner failed with: {0}", err);
             }

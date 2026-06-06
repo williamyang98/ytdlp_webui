@@ -41,7 +41,8 @@ dyn_clone::clone_trait_object!(ProcessPipeHandler);
 
 pub struct ProcessWorker {
     pub label: Option<String>,
-    pub threadpool: Arc<ThreadPool>,
+    pub stdout_threadpool: Arc<ThreadPool>,
+    pub stderr_threadpool: Arc<ThreadPool>,
     pub logging_folder: PathBuf,
     pub stdout_filename: PathBuf,
     pub stderr_filename: PathBuf,
@@ -51,14 +52,15 @@ pub struct ProcessWorker {
 }
 
 impl ProcessWorker {
-    pub fn new(threadpool: Arc<ThreadPool>, logging_folder: &Path) -> Self {
+    pub fn new(stdout_threadpool: Arc<ThreadPool>, stderr_threadpool: Arc<ThreadPool>, logging_folder: &Path) -> Self {
         let logging_folder = logging_folder.to_path_buf();
         let stdout_filename = logging_folder.join("stdout.log");
         let stderr_filename = logging_folder.join("stderr.log");
         let system_log_filename = logging_folder.join("system.log");
         Self {
             label: None,
-            threadpool,
+            stdout_threadpool,
+            stderr_threadpool,
             logging_folder,
             stdout_filename,
             stderr_filename,
@@ -139,14 +141,14 @@ impl ProcessWorker {
             let pipe_filename = self.stdout_filename.clone();
             let pipe_reader = process.stdout.take().ok_or(ProcessWorkerError::LogAcquireFail(pipe_type))?;
             let pipe_handler = self.stdout_handler.clone();
-            self.create_reader(pipe_type, pipe_filename, pipe_reader, pipe_handler)?
+            self.create_reader(&self.stdout_threadpool, pipe_type, pipe_filename, pipe_reader, pipe_handler)?
         };
         let stderr_fence = {
             let pipe_type = ProcessPipe::Stderr;
             let pipe_filename = self.stderr_filename.clone();
             let pipe_reader = process.stderr.take().ok_or(ProcessWorkerError::LogAcquireFail(pipe_type))?;
             let pipe_handler = self.stderr_handler.clone();
-            self.create_reader(pipe_type, pipe_filename, pipe_reader, pipe_handler)?
+            self.create_reader(&self.stderr_threadpool, pipe_type, pipe_filename, pipe_reader, pipe_handler)?
         };
 
         // join stdio handles
@@ -177,13 +179,14 @@ impl ProcessWorker {
 
     fn create_reader(
         &self,
+        threadpool: &ThreadPool,
         pipe_type: ProcessPipe,
         pipe_filename: PathBuf,
         pipe_reader: impl Read + Send + 'static,
         pipe_handler: Option<Box<dyn ProcessPipeHandler>>,
     ) -> Result<Arc<ProcessPipeFence<(), ProcessWorkerError>>, ProcessWorkerError> {
         let pipe_fence = Arc::new(ProcessPipeFence::default());
-        self.threadpool.execute({
+        threadpool.execute({
             let pipe_fence = pipe_fence.clone();
             let mut pipe_reader = BufReader::new(ConvertCarriageReturnToNewLine::new(pipe_reader));
             let pipe_file = std::fs::File::create(&pipe_filename).map_err(|e| ProcessWorkerError::LogCreateError(e, pipe_type))?;
