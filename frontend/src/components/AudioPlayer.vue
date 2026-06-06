@@ -70,6 +70,7 @@ watch(audio_elem, (elem) => {
 });
 
 function format_duration(seconds: number): string {
+  seconds = Math.round(seconds);
   const dhms = convert_seconds_to_dhms(seconds);
   return convert_dhms_to_string(dhms);
 }
