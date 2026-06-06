@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
 import SortIcon from "./SortIcon.vue";
 import DownloadProgressBar from "./DownloadProgressBar.vue";
-import { FileMusic, FileTerminal, Trash2 } from 'lucide-vue-next';
+import { ref, computed } from "vue";
+import { FileTerminal, Trash2 } from 'lucide-vue-next';
+import AudioPlayer from "./AudioPlayer.vue";
+
+import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
 import { format_datetime } from "../utility/format.ts";
 import { get_data_url } from "../api/api.ts";
-import { ref, computed } from "vue";
 import { providers } from "../providers/providers.ts";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
 
@@ -142,9 +144,7 @@ const sorted_items = computed(() => {
           <td>{{ item.status }}</td>
           <td>{{ format_datetime(item.unix_time) }}</td>
           <td>
-            <a v-if="item.audio_path" class="btn btn-sm px-1" :href="get_data_url(item.audio_path)">
-              <FileMusic class="size-5"/>
-            </a>
+            <AudioPlayer v-if="item.audio_path" :url="get_data_url(item.audio_path)"/>
           </td>
           <td>
             <a v-if="item.stdout_log_path" class="btn btn-sm px-1" :href="get_data_url(item.stdout_log_path)">
@@ -167,6 +167,9 @@ const sorted_items = computed(() => {
             </button>
           </td>
         </tr>
+      </template>
+      <template v-if="sorted_items.length === 0">
+        <td colspan="8" class="text-center"><span class="text-nowrap">No downloads</span></td>
       </template>
     </tbody>
   </table>
