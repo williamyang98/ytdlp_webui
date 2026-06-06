@@ -69,6 +69,18 @@ watch(audio_elem, (elem) => {
   });
 });
 
+// when loading on press start playing immediately
+watch(is_loaded, (is_loaded) => {
+  if (!is_loaded) return;
+  const elem = audio_elem.value;
+  if (elem === null) return;
+  elem.play()
+    .catch((error: unknown) => {
+      if (elem.paused) return;
+      console.error(error);
+    });
+});
+
 function format_duration(seconds: number): string {
   seconds = Math.round(seconds);
   const dhms = convert_seconds_to_dhms(seconds);
