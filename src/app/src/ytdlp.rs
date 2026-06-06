@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Serialize;
+use youtube_api::VideoId;
 
 // NOTE: The ytdlp cli output is not stable, but we can manually format certain outputs
 //       We will then do pattern matching on that controlled output
@@ -84,8 +85,10 @@ pub fn parse_stdout_line(line: &str) -> Option<ParsedStdoutLine> {
 #[derive(Clone,Debug)]
 pub enum ParsedStderrLine {
     UsageError(String),
-    MissingVideo(String),
     ExtractPath(String),
+    VideoUnavailableError { video_id: VideoId, message: String },
+    AgeRestrictedError { video_id: VideoId, message: String },
+    UnhandledError { video_id: VideoId, message: String },
 }
 
 pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
@@ -93,13 +96,13 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
         static ref USAGE_ERROR_REGEX: Regex = Regex::new(
             r"yt-dlp.exe:\s+error:\s+(.+)"
         ).unwrap();
-        static ref MISSING_VIDEO_REGEX: Regex = Regex::new(format!(
-            r"ERROR:\s+\[youtube\]\s+({0}): Video unavailable",
-            YOUTUBE_ID_REGEX,
-        ).as_str()).unwrap();
         static ref EXTRACT_PATH_REGEX: Regex = Regex::new(
             r"\[ExtractAudio\]\s*Destination:\s*(.+)",
         ).unwrap();
+        static ref RUNTIME_ERROR_REGEX: Regex = Regex::new(format!(
+            r"ERROR:\s+\[youtube\]\s+({0}):\s*(.+)",
+            YOUTUBE_ID_REGEX,
+        ).as_str()).unwrap();
     }
     let line = line.trim();
     if let Some(captures) = USAGE_ERROR_REGEX.captures(line) {
@@ -107,15 +110,26 @@ pub fn parse_stderr_line(line: &str) -> Option<ParsedStderrLine> {
             return Some(ParsedStderrLine::UsageError(error.to_owned()));
         }
     }
-    if let Some(captures) = MISSING_VIDEO_REGEX.captures(line) {
-        if let Some(id) = captures.get(1).map(|m| m.as_str()) {
-            return Some(ParsedStderrLine::MissingVideo(id.to_owned()));
-        }
-    }
     if let Some(captures) = EXTRACT_PATH_REGEX.captures(line) {
         if let Some(id) = captures.get(1).map(|m| m.as_str()) {
             return Some(ParsedStderrLine::ExtractPath(id.to_owned()));
         }
     }
-    None
+
+    let captures = RUNTIME_ERROR_REGEX.captures(line)?;
+    let video_id: VideoId = captures.get(1).and_then(|m| m.as_str().try_into().ok())?;
+    let error_message = captures.get(2).map(|m| m.as_str())?;
+
+    if let Some(message) = error_message.strip_prefix("Video unavailable.") {
+        let message = message.trim().to_owned();
+        return Some(ParsedStderrLine::VideoUnavailableError { video_id, message });
+    }
+
+    if let Some(message) = error_message.strip_prefix("Sign in to confirm your age. This video may be inappropriate for some users.") {
+        let message = message.trim().to_owned();
+        return Some(ParsedStderrLine::AgeRestrictedError { video_id, message });
+    }
+
+    let error_message = error_message.trim().to_owned();
+    Some(ParsedStderrLine::UnhandledError { video_id, message: error_message })
 }

@@ -152,10 +152,6 @@ impl ProcessPipeHandler for YtdlpStderrHandler {
     fn read_line(&self, line: &str) -> ControlFlow<()> {
         match ytdlp::parse_stderr_line(line) {
             None => ControlFlow::Continue(()),
-            Some(ytdlp::ParsedStderrLine::MissingVideo(id)) => {
-                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Missing video id: {id}")));
-                ControlFlow::Break(())
-            },
             Some(ytdlp::ParsedStderrLine::UsageError(message)) => {
                 *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Usage error: {message}")));
                 ControlFlow::Break(())
@@ -163,6 +159,18 @@ impl ProcessPipeHandler for YtdlpStderrHandler {
             Some(ytdlp::ParsedStderrLine::ExtractPath(path)) => {
                 *self.extract_path.lock().unwrap() = Some(Ok(path));
                 ControlFlow::Continue(())
+            },
+            Some(ytdlp::ParsedStderrLine::VideoUnavailableError { video_id, message }) => {
+                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Video {video_id} unavailable: {message}")));
+                ControlFlow::Break(())
+            },
+            Some(ytdlp::ParsedStderrLine::AgeRestrictedError { video_id, message: _message }) => {
+                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Video {video_id} age restricted")));
+                ControlFlow::Break(())
+            },
+            Some(ytdlp::ParsedStderrLine::UnhandledError { video_id, message }) => {
+                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Error downloading video {video_id}: {message}")));
+                ControlFlow::Break(())
             },
         }
     }
