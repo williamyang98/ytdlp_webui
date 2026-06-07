@@ -257,9 +257,6 @@ export class App {
 
   async request_transcode(key: TranscodeKey) {
     const response = await api.request_transcode(key);
-    this.pending_request = key;
-    this.selected_download_key = key.video_id;
-    this.selected_transcode_key = key;
 
     const run_download = async () => {
       await this.get_download(key.video_id);
@@ -277,7 +274,6 @@ export class App {
         await this.get_transcode(key);
       }
     };
-    void this.get_youtube_video(key.video_id);
     void run_download();
     void run_transcode();
     return response;

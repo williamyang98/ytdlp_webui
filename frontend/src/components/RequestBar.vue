@@ -28,7 +28,13 @@ async function submit() {
       video_id: result.video_id,
       audio_ext: app.youtube_search_bar.audio_ext,
     };
-    await app.request_transcode(key);
+    await Promise.all([
+      app.request_transcode(key),
+      app.get_youtube_video(key.video_id),
+    ]);
+    app.pending_request = key;
+    app.selected_download_key = key.video_id;
+    app.selected_transcode_key = key;
   }
 }
 </script>
