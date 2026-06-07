@@ -27,12 +27,6 @@ const app = providers.app;
 </div>
 <div v-if="app.youtube_playlist !== null" class="w-full">
   <div class="divider my-0.5"></div>
-  <div class="w-full flex justify-between px-1">
-    <div class="font-medium">Video Playlist ({{ app.youtube_playlist.items.length }})</div>
-    <button class="btn btn-sm px-1" @click="app.get_youtube_playlist(app.youtube_playlist.id, true)"><RefreshCwIcon class="size-5"/></button>
-  </div>
-  <div class="max-h-75 w-full overflow-x-auto">
-    <YoutubePlaylistTable :playlist="app.youtube_playlist"/>
-  </div>
+  <YoutubePlaylistTable :playlist="app.youtube_playlist"/>
 </div>
 </template>

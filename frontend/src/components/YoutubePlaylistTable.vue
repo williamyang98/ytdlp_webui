@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
+import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
 import * as api from "../api/api.ts";
 import { computed, reactive, ref, watch } from "vue";
 import { providers } from "../providers/providers.ts";
 import { type Playlist } from "../providers/app.ts";
 import { convert_dhms_to_string, format_date, type DHMS } from "../utility/format.ts";
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
+import { DownloadIcon, RefreshCwIcon, SettingsIcon } from "lucide-vue-next";
 import SortIcon from "./SortIcon.vue";
 
 const app = providers.app;
@@ -15,6 +17,7 @@ const props = defineProps<{
 
 // fetch row
 const rows = ref<Row[]>([]);
+const is_hide_duplicate_videos = ref(true);
 
 class Row {
   index: number;
@@ -79,7 +82,19 @@ function dhms_to_seconds(dhms: DHMS): number {
 const sorted_rows = computed(() => {
   const column = sort_order.value.column;
   const is_descending = sort_order.value.is_descending;
-  const items = [...rows.value];
+  let items = [];
+
+  if (is_hide_duplicate_videos.value) {
+    const video_id_set = new Set<VideoId>();
+    for (const item of rows.value) {
+      if (video_id_set.has(item.video_id)) continue;
+      video_id_set.add(item.video_id);
+      items.push(item);
+    }
+  } else {
+    items = [...rows.value];
+  }
+
   switch (column) {
     case "index": {
       items.sort((a, b) => a.index - b.index);
@@ -155,82 +170,113 @@ function select_playlist_item(row: Row) {
   app.select_playlist_item(props.playlist.id, row.video_id);
 }
 
+async function download_all() {
+  const audio_ext = app.youtube_search_bar.audio_ext;
+  const promises = [];
+  for (const item of sorted_rows.value) {
+    const video_id = item.video_id;
+    const key: TranscodeKey = { video_id, audio_ext };
+    promises.push(app.request_transcode(key));
+  }
+  await Promise.all(promises);
+}
+
 </script>
 
 <template>
-<table class="table table-pin-rows table-pin-cols table-extra-compact">
-  <colgroup>
-    <col class="w-px"/>
-    <col class="w-px"/>
-    <col class="min-w-50 w-full"/>
-    <col class="w-px"/>
-    <col class="w-px"/>
-    <col class="w-px"/>
-  </colgroup>
-  <thead>
-    <tr>
-      <th>
-        <div class="inline-flex gap-2">
-          <div @click="click_sort_column('index')"><SortIcon :is_descending="get_sort_icon_mode('index')"/></div>
-        </div>
-      </th>
-      <th>
-        <div class="inline-flex gap-2">
-          <div>Video ID</div>
-          <div @click="click_sort_column('video_id')"><SortIcon :is_descending="get_sort_icon_mode('video_id')"/></div>
-        </div>
-      </th>
-      <th>
-        <div class="inline-flex gap-2">
-          <div>Title</div>
-          <div @click="click_sort_column('title')"><SortIcon :is_descending="get_sort_icon_mode('title')"/></div>
-        </div>
-      </th>
-      <th>
-        <div class="inline-flex gap-2">
-          <div>Duration</div>
-          <div @click="click_sort_column('duration')"><SortIcon :is_descending="get_sort_icon_mode('duration')"/></div>
-        </div>
-      </th>
-      <th>
-        <div class="inline-flex gap-2">
-          <div>Channel</div>
-          <div @click="click_sort_column('channel')"><SortIcon :is_descending="get_sort_icon_mode('channel')"/></div>
-        </div>
-      </th>
-      <th>
-        <div class="inline-flex gap-2">
-          <div>Published At</div>
-          <div @click="click_sort_column('published_at')"><SortIcon :is_descending="get_sort_icon_mode('published_at')"/></div>
-        </div>
-      </th>
-      <th>Link</th>
-    </tr>
-  </thead>
-  <tbody>
-    <template v-for="row in sorted_rows" :key="row.index">
-      <tr
-        class="hover:bg-base-300 cursor-pointer"
-        :class="get_playlist_item_class(row)"
-        @click="select_playlist_item(row)"
-      >
-        <th>{{ row.index+1 }}</th>
-        <td>{{ row.video_id }}</td>
-        <template v-if="row.video_item !== null">
-          <td>{{ row.video_item.snippet.title }}</td>
-          <td>{{ convert_dhms_to_string(row.video_item.contentDetails.duration) }}</td>
-          <td><span class="text-nowrap">{{ row.video_item.snippet.channelTitle }}</span></td>
-          <td>{{ format_date(row.video_item.snippet.publishedAt) }}</td>
-          <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist.id, row.video_id)">Link</a></td>
-        </template>
-        <template v-else-if="row.is_fetch_error">
-          <td colspan="5"><span class="text-nowrap text-error font-medium">Error fetching video information</span></td>
-        </template>
-        <template v-else>
-          <td colspan="5"><span class="text-nowrap font-light">Loading ...</span></td>
-        </template>
+<div class="w-full flex justify-between px-1">
+  <div class="font-medium">Video Playlist ({{ sorted_rows.length }})</div>
+  <div class="flex px-0">
+    <div class="tooltip" data-tip="Download All">
+      <button class="btn btn-sm rounded-none rounded-l px-1" @click="download_all"><DownloadIcon class="size-5"/></button>
+    </div>
+    <div class="tooltip" data-tip="Refresh Playlist">
+      <button class="btn btn-sm rounded-none px-1" @click="app.get_youtube_playlist(playlist.id, true)"><RefreshCwIcon class="size-5"/></button>
+    </div>
+    <button class="btn btn-sm rounded-none rounded-r px-1" popovertarget="popover-1" style="anchor-name:--playlist-settings"><SettingsIcon class="size-5"/></button>
+    <ul class="dropdown menu w-52 rounded-box bg-base-100 shadow-sm" popover id="popover-1" style="position-anchor:--playlist-settings">
+      <li><label><input type="checkbox" v-model="is_hide_duplicate_videos" class="checkbox"/>Hide duplicate videos</label></li>
+    </ul>
+  </div>
+</div>
+<div class="max-h-75 w-full overflow-x-auto">
+  <table class="table table-pin-rows table-pin-cols table-extra-compact">
+    <colgroup>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="min-w-50 w-full"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
+    </colgroup>
+    <thead>
+      <tr>
+        <th>
+          <div class="inline-flex gap-2">
+            <div @click="click_sort_column('index')"><SortIcon :is_descending="get_sort_icon_mode('index')"/></div>
+          </div>
+        </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Video ID</div>
+            <div @click="click_sort_column('video_id')"><SortIcon :is_descending="get_sort_icon_mode('video_id')"/></div>
+          </div>
+        </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Title</div>
+            <div @click="click_sort_column('title')"><SortIcon :is_descending="get_sort_icon_mode('title')"/></div>
+          </div>
+        </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Duration</div>
+            <div @click="click_sort_column('duration')"><SortIcon :is_descending="get_sort_icon_mode('duration')"/></div>
+          </div>
+        </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Channel</div>
+            <div @click="click_sort_column('channel')"><SortIcon :is_descending="get_sort_icon_mode('channel')"/></div>
+          </div>
+        </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Published At</div>
+            <div @click="click_sort_column('published_at')"><SortIcon :is_descending="get_sort_icon_mode('published_at')"/></div>
+          </div>
+        </th>
+        <th>Link</th>
       </tr>
-    </template>
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      <template v-for="row in sorted_rows" :key="row.index">
+        <tr
+          class="hover:bg-base-300 cursor-pointer"
+          :class="get_playlist_item_class(row)"
+          @click="select_playlist_item(row)"
+        >
+          <th>{{ row.index+1 }}</th>
+          <td>{{ row.video_id }}</td>
+          <template v-if="row.video_item !== null">
+            <td>{{ row.video_item.snippet.title }}</td>
+            <td>{{ convert_dhms_to_string(row.video_item.contentDetails.duration) }}</td>
+            <td><span class="text-nowrap">{{ row.video_item.snippet.channelTitle }}</span></td>
+            <td>{{ format_date(row.video_item.snippet.publishedAt) }}</td>
+            <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist.id, row.video_id)">Link</a></td>
+          </template>
+          <template v-else-if="row.is_fetch_error">
+            <td colspan="5"><span class="text-nowrap text-error font-medium">Error fetching video information</span></td>
+          </template>
+          <template v-else>
+            <td colspan="5"><span class="text-nowrap font-light">Loading ...</span></td>
+          </template>
+        </tr>
+      </template>
+      <template v-if="sorted_rows.length === 0">
+        <td colspan="7" class="text-center"><span class="text-nowrap">No videos in playlist</span></td>
+      </template>
+    </tbody>
+  </table>
+</div>
 </template>
