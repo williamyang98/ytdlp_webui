@@ -8,12 +8,12 @@ import AudioPlayer from "./AudioPlayer.vue";
 import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
 import { format_datetime } from "../utility/format.ts";
 import { create_data_url } from "../api/api.ts";
-import { providers } from "../providers/providers.ts";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
 import { use_cached_api_store } from "../stores/cached_api.ts";
+import { use_shared_app_store } from "../stores/shared_app.ts";
 
 const cached_api = use_cached_api_store();
-const app = providers.app;
+const shared_app = use_shared_app_store();
 
 const sort_order = ref<Order>({
   column: "time",
@@ -27,7 +27,7 @@ interface Order {
 }
 
 function select_download(row: YtdlpRow) {
-  app.select_download(cached_api, row.video_id);
+  shared_app.select_download(row.video_id);
 }
 
 async function delete_download(row: YtdlpRow) {
@@ -35,7 +35,7 @@ async function delete_download(row: YtdlpRow) {
 }
 
 function get_selected_class(row: YtdlpRow): string {
-  return row.video_id === app.selected_download_key ? "bg-base-300" : "";
+  return row.video_id === shared_app.selected_download_key ? "bg-base-300" : "";
 }
 
 function click_sort_column(column: Column) {
@@ -91,7 +91,7 @@ const sorted_items = computed(() => {
   <h1 class="text-xl font-bold">Downloads ({{ sorted_items.length }})</h1>
   <button class="btn btn-sm" @click="cached_api.get_downloads(true)">Refresh</button>
 </div>
-<DownloadProgressBar v-if="app.selected_download_key !== null" :download_key="app.selected_download_key"/>
+<DownloadProgressBar v-if="shared_app.selected_download_key !== null" :download_key="shared_app.selected_download_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">
     <colgroup>

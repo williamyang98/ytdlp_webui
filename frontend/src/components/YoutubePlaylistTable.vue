@@ -2,15 +2,16 @@
 import { type PlaylistId, type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
 import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
 import { type Ref, type ComputedRef, computed, ref } from "vue";
-import { providers } from "../providers/providers.ts";
 import { convert_dhms_to_string, format_date, type DHMS } from "../utility/format.ts";
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
 import { DownloadIcon, RefreshCwIcon, SettingsIcon } from "lucide-vue-next";
 import SortIcon from "./SortIcon.vue";
 import { use_cached_api_store } from "../stores/cached_api.ts";
+import { use_shared_app_store } from "../stores/shared_app.ts";
 
-const app = providers.app;
 const cached_api = use_cached_api_store();
+const shared_app = use_shared_app_store();
+
 const props = defineProps<{
   playlist_id: PlaylistId,
 }>();
@@ -152,18 +153,18 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
 
 // select playlist item
 function get_playlist_item_class(row: Row): string {
-  const video_id = app.selected_youtube_video;
+  const video_id = shared_app.selected_youtube_video;
   if (video_id === null) return "";
   const is_selected = row.video_id === video_id;
   return is_selected ? "bg-base-300" : "";
 }
 
-function select_playlist_item(row: Row) {
-  app.select_playlist_item(props.playlist_id, row.video_id);
+function select_youtube_playlist_item(row: Row) {
+  shared_app.select_youtube_playlist_item(props.playlist_id, row.video_id);
 }
 
 async function download_all() {
-  const audio_ext = app.youtube_search_bar.audio_ext;
+  const audio_ext = shared_app.youtube_search_bar.audio_ext;
   const promises = [];
   for (const item of sorted_rows.value) {
     const video_id = item.video_id;
@@ -246,7 +247,7 @@ async function download_all() {
         <tr
           class="hover:bg-base-300 cursor-pointer"
           :class="get_playlist_item_class(row)"
-          @click="select_playlist_item(row)"
+          @click="select_youtube_playlist_item(row)"
         >
           <th>{{ row.index+1 }}</th>
           <td>{{ row.video_id }}</td>

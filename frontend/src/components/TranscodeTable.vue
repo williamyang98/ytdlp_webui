@@ -9,10 +9,10 @@ import { create_data_url } from "../api/api.ts";
 import { ref, computed } from "vue";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
 import { use_cached_api_store } from "../stores/cached_api.ts";
-import { providers } from "../providers/providers.ts";
+import { use_shared_app_store } from "../stores/shared_app.ts";
 
 const cached_api = use_cached_api_store();
-const app = providers.app;
+const shared_app = use_shared_app_store();
 
 const sort_order = ref<Order>({
   column: "time",
@@ -30,7 +30,7 @@ function select_transcode(row: FfmpegRow) {
     video_id: row.video_id,
     audio_ext: row.audio_ext,
   };
-  app.select_transcode(cached_api, key);
+  shared_app.select_transcode(key);
 }
 
 async function delete_transcode(row: FfmpegRow) {
@@ -42,7 +42,7 @@ async function delete_transcode(row: FfmpegRow) {
 }
 
 function get_selected_class(row: FfmpegRow): string {
-  const key = app.selected_transcode_key;
+  const key = shared_app.selected_transcode_key;
   if (key === null) return "";
   const is_selected = row.video_id === key.video_id && row.audio_ext === key.audio_ext;
   return is_selected ? "bg-base-300" : "";
@@ -105,7 +105,7 @@ const sorted_items = computed(() => {
   <h1 class="text-xl font-bold">Transcodes ({{ sorted_items.length }})</h1>
   <button class="btn btn-sm" @click="cached_api.get_transcodes(true)">Refresh</button>
 </div>
-<TranscodeProgressBar v-if="app.selected_transcode_key" :transcode_key="app.selected_transcode_key"/>
+<TranscodeProgressBar v-if="shared_app.selected_transcode_key" :transcode_key="shared_app.selected_transcode_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">
     <colgroup>

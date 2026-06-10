@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { onMounted, watch } from "vue";
 import { useRouter, useRoute, RouterView } from 'vue-router';
 import { routes } from "./routes/routes.ts";
 import GithubIcon from "./assets/github.svg";
@@ -7,11 +7,17 @@ import DarkModeToggle from "./components/DarkModeToggle.vue";
 import { MenuIcon } from 'lucide-vue-next';
 // providers
 import UserDataProvider from "./providers/UserDataProvider.vue";
-import AppProvider from "./providers/AppProvider.vue";
 import ToastProvider from './providers/ToastProvider.vue';
+import { use_cached_api_store } from "./stores/cached_api.ts";
 
 const router = useRouter();
 const current_route = useRoute();
+const cached_api = use_cached_api_store();
+
+onMounted(() => {
+  void cached_api.get_downloads(true);
+  void cached_api.get_transcodes(true);
+});
 
 // close open dropdowns on route change (such as those on navbar)
 watch(() => current_route.fullPath, () => {
@@ -30,7 +36,6 @@ watch(() => current_route.name, (name) => {
 
 <template>
 <ToastProvider>
-<AppProvider>
 <UserDataProvider>
 <div class="w-screen h-screen overflow-hidden flex flex-col">
   <!-- Navbar -->
@@ -80,7 +85,6 @@ watch(() => current_route.name, (name) => {
   </div>
 </div>
 </UserDataProvider>
-</AppProvider>
 </ToastProvider>
 </template>
 
