@@ -22,6 +22,13 @@ async function sleep(milliseconds: number) {
   await new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+export interface BackgroundWorkerCreator<K,V> {
+  key: K;
+  get_value: (key: K) => Promise<V>;
+  set_value: (value: V) => void;
+  is_finished: () => boolean;
+}
+
 export class BackgroundWorker<K,V> {
   key: K;
   total_requests: number;
@@ -32,7 +39,7 @@ export class BackgroundWorker<K,V> {
   error: string | null;
   promise: Promise<void> | null;
 
-  constructor(key: K, get_value: (key: K) => Promise<V>, set_value: (value: V) => void, is_finished: () => boolean) {
+  constructor({ key, get_value, set_value, is_finished }: BackgroundWorkerCreator<K,V>) {
     this.key = key;
     this.get_value = get_value;
     this.set_value = set_value;
@@ -112,8 +119,9 @@ export const use_cached_api_store = defineStore("cached_api", () => {
   async function delete_transcode(key: TranscodeKey) {
     const response = await api.delete_transcode(key);
     const hash = get_transcode_key_hash(key);
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete transcodes.value[hash];
+    delete transcodes.value[hash]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+    delete transcode_state.value[hash]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+    delete transcode_background_worker.value[hash]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
     return response;
   }
 
@@ -138,8 +146,9 @@ export const use_cached_api_store = defineStore("cached_api", () => {
 
   async function delete_download(key: DownloadKey) {
     const response = await api.delete_download(key);
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete downloads.value[key];
+    delete downloads.value[key]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+    delete download_state.value[key]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+    delete download_background_worker.value[key]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
     return response;
   }
 
@@ -147,16 +156,19 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     const old_value = youtube_videos.value[video_id];
     const old_error = youtube_videos_error.value[video_id];
     if (force !== true) {
-      if (old_value !== undefined) return old_value;
-      if (old_error !== undefined) throw new Error(old_error);
+      if (old_value !== undefined) {
+        return old_value;
+      }
+      if (old_error !== undefined) {
+        throw new Error(old_error);
+      }
     }
 
     try {
       const new_value = await api.get_youtube_video(video_id, force);
       youtube_videos.value[video_id] = new_value;
       if (old_error !== undefined) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete youtube_videos_error.value[video_id];
+        delete youtube_videos_error.value[video_id]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
       }
       return new_value;
     } catch (error: unknown) {
@@ -169,16 +181,19 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     const old_value = youtube_playlists.value[playlist_id];
     const old_error = youtube_playlists_error.value[playlist_id];
     if (force !== true) {
-      if (old_value !== undefined) return old_value;
-      if (old_error !== undefined) throw new Error(old_error);
+      if (old_value !== undefined) {
+        return old_value;
+      }
+      if (old_error !== undefined) {
+        throw new Error(old_error);
+      }
     }
 
     try {
       const new_value = await api.get_youtube_playlist(playlist_id, force);
       youtube_playlists.value[playlist_id] = new_value;
       if (old_error !== undefined) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete youtube_playlists_error.value[playlist_id];
+        delete youtube_playlists_error.value[playlist_id]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
       }
       return new_value;
     } catch (error: unknown) {
@@ -191,22 +206,22 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     const hash = get_transcode_key_hash(key);
     let worker = transcode_background_worker.value[hash];
     if (worker === undefined) {
-      worker = new BackgroundWorker<TranscodeKey, TranscodeState>(
+      worker = new BackgroundWorker<TranscodeKey, TranscodeState>({
         key,
-        (key: TranscodeKey) => api.get_transcode_state(key),
-        (new_value: TranscodeState) => {
+        get_value: (key: TranscodeKey) => api.get_transcode_state(key),
+        set_value: (new_value: TranscodeState) => {
           const old_value = transcode_state.value[hash];
           if (old_value?.worker_status !== new_value.worker_status) {
             void get_transcode(key, true);
           }
           transcode_state.value[hash] = new_value;
         },
-        (): boolean => {
+        is_finished: (): boolean => {
           const old_value = transcode_state.value[hash];
           if (old_value === undefined) return false;
           return !is_worker_running(old_value.worker_status);
         },
-      );
+      });
       transcode_background_worker.value[hash] = worker;
     }
     worker.start(restart_if_idle);
@@ -215,22 +230,22 @@ export const use_cached_api_store = defineStore("cached_api", () => {
   function start_download_background_worker(key: DownloadKey, restart_if_idle?: boolean) {
     let worker = download_background_worker.value[key];
     if (worker === undefined) {
-      worker = new BackgroundWorker<DownloadKey, DownloadState>(
+      worker = new BackgroundWorker<DownloadKey, DownloadState>({
         key,
-        (key: DownloadKey) => api.get_download_state(key),
-        (new_value: DownloadState) => {
+        get_value: (key: DownloadKey) => api.get_download_state(key),
+        set_value: (new_value: DownloadState) => {
           const old_value = download_state.value[key];
           if (old_value?.worker_status !== new_value.worker_status) {
             void get_download(key, true);
           }
           download_state.value[key] = new_value;
         },
-        (): boolean => {
+        is_finished: (): boolean => {
           const old_value = download_state.value[key];
           if (old_value === undefined) return false;
           return !is_worker_running(old_value.worker_status);
         },
-      );
+      });
       download_background_worker.value[key] = worker;
     }
     worker.start(restart_if_idle);
