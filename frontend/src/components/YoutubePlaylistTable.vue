@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { type PlaylistId, type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
 import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
-import { type Ref, type ComputedRef, computed, ref } from "vue";
+import { type ComputedRef, computed, ref } from "vue";
 import { convert_dhms_to_string, format_date, type DHMS } from "../utility/format.ts";
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
 import { DownloadIcon, RefreshCwIcon, SettingsIcon } from "lucide-vue-next";
@@ -36,8 +36,7 @@ class Row {
   playlist_item: PlaylistItem;
   video_item: ComputedRef<VideoItem | undefined>;
   status: ComputedRef<Status>;
-  error: Ref<string | null>;
-  promise: Promise<void>;
+  video_error: ComputedRef<string | undefined>;
 
   constructor(index: number, item: PlaylistItem) {
     const video_id = item.contentDetails.videoId;
@@ -48,25 +47,21 @@ class Row {
       const video = cached_api.youtube_videos[this.video_id];
       return video;
     });
-  this.status = computed((): Status => {
-    const download_state = cached_api.download_state[video_id];
-    if (download_state?.worker_status !== "finished") return "downloading";
+    this.status = computed((): Status => {
+      const download_state = cached_api.download_state[video_id];
+      if (download_state?.worker_status !== "finished") return "downloading";
 
-    const transcode_key: TranscodeKey = { video_id, audio_ext: shared_app.youtube_search_bar.audio_ext };
-    const hash = get_transcode_key_hash(transcode_key);
-    const transcode_state = cached_api.transcode_state[hash];
-    if (transcode_state?.worker_status !== "finished") return "transcoding";
-    return "download_ready";
-  });
-    this.error = ref(null);
-    const runner = async () => {
-      try {
-        void await cached_api.get_youtube_video(this.video_id);
-      } catch (error: unknown) {
-        this.error.value = String(error);
-      }
-    };
-    this.promise = runner();
+      const transcode_key: TranscodeKey = { video_id, audio_ext: shared_app.youtube_search_bar.audio_ext };
+      const hash = get_transcode_key_hash(transcode_key);
+      const transcode_state = cached_api.transcode_state[hash];
+      if (transcode_state?.worker_status !== "finished") return "transcoding";
+      return "download_ready";
+    });
+    this.video_error = computed(() => {
+      const video = cached_api.youtube_videos_error[this.video_id];
+      return video;
+    });
+    void cached_api.get_youtube_video(video_id);
   }
 }
 
@@ -294,8 +289,8 @@ async function download_all() {
             <td>{{ format_date(row.video_item.value.snippet.publishedAt) }}</td>
             <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist_id, row.video_id)">Link</a></td>
           </template>
-          <template v-else-if="row.error.value !== null">
-            <td colspan="6"><span class="text-nowrap text-error font-medium">Error fetching video information: {{ row.error.value }}</span></td>
+          <template v-else-if="row.video_error.value !== undefined">
+            <td colspan="6"><span class="text-nowrap text-error font-medium">Error fetching video information: {{ row.video_error.value }}</span></td>
           </template>
           <template v-else>
             <td colspan="6"><span class="text-nowrap font-light">Loading ...</span></td>
