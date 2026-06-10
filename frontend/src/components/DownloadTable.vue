@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import SortIcon from "./SortIcon.vue";
 import DownloadProgressBar from "./DownloadProgressBar.vue";
-import { ref, computed, type ComputedRef } from "vue";
-import { FileTerminal, RefreshCwIcon, Trash2 } from 'lucide-vue-next';
+import { ref, computed, type ComputedRef, useTemplateRef } from "vue";
+import { FileTerminal, OctagonAlertIcon, RefreshCwIcon, Trash2, TrashIcon } from 'lucide-vue-next';
 import AudioPlayer from "./AudioPlayer.vue";
 
 import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
@@ -112,13 +112,37 @@ const sorted_items = computed(() => {
   return sorted_items;
 });
 
+const delete_modal = useTemplateRef("delete-modal");
+function delete_all_downloads() {
+  const video_ids = sorted_items.value.map(v => v.state.video_id);
+  const promises = video_ids.map(id => cached_api.delete_download(id));
+  void promises;
+  delete_modal.value?.close();
+}
+
 </script>
 
 <template>
 <div class="inline-flex w-full justify-between py-1">
   <h1 class="text-xl font-bold">Downloads ({{ sorted_items.length }})</h1>
-  <button class="btn btn-sm px-1" @click="cached_api.get_downloads(true)"><RefreshCwIcon class="size-5"/></button>
+  <div class="flex">
+    <button class="btn btn-sm px-1 rounded-none rounded-l" @click="delete_modal?.showModal()"><TrashIcon class="size-5"/></button>
+    <button class="btn btn-sm px-1 rounded-none rounded-r" @click="cached_api.get_downloads(true)"><RefreshCwIcon class="size-5"/></button>
+  </div>
 </div>
+<dialog class="modal" ref="delete-modal">
+  <div class="modal-box justify-items-center">
+    <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2" @click.stop="delete_modal?.close()">✕</button>
+    <OctagonAlertIcon class="size-[5rem] text-error"/>
+    <h3 class="text-lg font-bold pt-2">Delete all downloads</h3>
+    <p class="text-center pt-2">Are you sure you want to delete all downloads?<br>This action cannot be undone</p>
+    <div class="flex w-full justify-between pt-2">
+      <button class="btn" @click.stop="delete_modal?.close()">Cancel</button>
+      <button class="btn btn-error" @click.stop="delete_all_downloads">Delete All</button>
+    </div>
+  </div>
+  <div class="modal-backdrop" @click.stop="delete_modal?.close()"></div>
+</dialog>
 <DownloadProgressBar v-if="shared_app.selected_download_key !== null" :download_key="shared_app.selected_download_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import SortIcon from "./SortIcon.vue";
 import TranscodeProgressBar from "./TranscodeProgressBar.vue";
-import { FileTerminal, RefreshCwIcon, Trash2 } from "lucide-vue-next";
+import { FileTerminal, RefreshCwIcon, Trash2, TrashIcon } from "lucide-vue-next";
 import AudioPlayer from "./AudioPlayer.vue";
 import { type TranscodeKey, type FfmpegRow } from "../api/ytdlp_api_schema.ts";
 import { format_datetime } from "../utility/format.ts";
 import { create_data_url } from "../api/api.ts";
-import { ref, computed, type ComputedRef } from "vue";
+import { ref, computed, type ComputedRef, useTemplateRef } from "vue";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
 import { use_cached_api_store } from "../stores/cached_api.ts";
 import { use_shared_app_store } from "../stores/shared_app.ts";
@@ -128,13 +128,40 @@ const sorted_items = computed(() => {
   return sorted_items;
 });
 
+const delete_modal = useTemplateRef("delete-modal");
+function delete_all_transcodes() {
+  const keys = sorted_items.value.map((item) => {
+    const key: TranscodeKey = item.state;
+    return key;
+  });
+  const promises = keys.map(key => cached_api.delete_transcode(key));
+  void promises;
+  delete_modal.value?.close();
+}
+
 </script>
 
 <template>
 <div class="inline-flex w-full justify-between py-1">
   <h1 class="text-xl font-bold">Transcodes ({{ sorted_items.length }})</h1>
-  <button class="btn btn-sm px-1" @click="cached_api.get_transcodes(true)"><RefreshCwIcon class="size-5"/></button>
+  <div class="flex">
+    <button class="btn btn-sm px-1 rounded-none rounded-l" @click="delete_modal?.showModal()"><TrashIcon class="size-5"/></button>
+    <button class="btn btn-sm px-1 rounded-none rounded-r" @click="cached_api.get_transcodes(true)"><RefreshCwIcon class="size-5"/></button>
+  </div>
 </div>
+<dialog class="modal" ref="delete-modal">
+  <div class="modal-box justify-items-center">
+    <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2" @click.stop="delete_modal?.close()">✕</button>
+    <OctagonAlertIcon class="size-[5rem] text-error"/>
+    <h3 class="text-lg font-bold pt-2">Delete all transcodes</h3>
+    <p class="text-center pt-2">Are you sure you want to delete all transcodes?<br>This action cannot be undone</p>
+    <div class="flex w-full justify-between pt-2">
+      <button class="btn" @click.stop="delete_modal?.close()">Cancel</button>
+      <button class="btn btn-error" @click.stop="delete_all_transcodes">Delete All</button>
+    </div>
+  </div>
+  <div class="modal-backdrop" @click.stop="delete_modal?.close()"></div>
+</dialog>
 <TranscodeProgressBar v-if="shared_app.selected_transcode_key" :transcode_key="shared_app.selected_transcode_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">
