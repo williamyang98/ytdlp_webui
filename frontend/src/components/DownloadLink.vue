@@ -16,10 +16,15 @@ const props = defineProps<{
 const cached_api = use_cached_api_store();
 const youtube_video = computed(() => {
   const video_id = props.pending_request.video_id;
-  void cached_api.get_youtube_video(video_id);
   const youtube_video = cached_api.youtube_videos[video_id];
-  if (youtube_video === undefined) return null;
   return youtube_video;
+});
+
+const video_id = computed(() => props.pending_request.video_id);
+watch(video_id, (video_id) => {
+  void cached_api.get_youtube_video(video_id);
+}, {
+  immediate: true,
 });
 
 const download_name = ref<string>("");
@@ -57,7 +62,7 @@ function download() {
 }
 
 watch(youtube_video, (youtube_video) => {
-  if (youtube_video === null) return;
+  if (youtube_video === undefined) return;
   if (set_download_filename_from_youtube_video(youtube_video)) return;
   set_download_filename_from_transcode_key(props.pending_request);
 }, {
