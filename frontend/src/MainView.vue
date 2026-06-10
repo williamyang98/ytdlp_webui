@@ -85,7 +85,7 @@ watch(() => current_route.name, (name) => {
 </template>
 
 <style scoped>
-@media (width < 24rem) {
+@media (width < 22rem) {
 .app-title {
   display: none;
 }
