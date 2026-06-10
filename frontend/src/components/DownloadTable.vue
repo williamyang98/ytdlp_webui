@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import SortIcon from "./SortIcon.vue";
 import DownloadProgressBar from "./DownloadProgressBar.vue";
-import { ref, computed } from "vue";
-import { FileTerminal, Trash2 } from 'lucide-vue-next';
+import { ref, computed, type ComputedRef } from "vue";
+import { FileTerminal, RefreshCwIcon, Trash2 } from 'lucide-vue-next';
 import AudioPlayer from "./AudioPlayer.vue";
 
 import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
@@ -11,6 +11,7 @@ import { create_data_url } from "../api/api.ts";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
 import { use_cached_api_store } from "../stores/cached_api.ts";
 import { use_shared_app_store } from "../stores/shared_app.ts";
+import { type VideoItem } from "../api/youtube_api_schema.ts";
 
 const cached_api = use_cached_api_store();
 const shared_app = use_shared_app_store();
@@ -20,7 +21,7 @@ const sort_order = ref<Order>({
   is_descending: true,
 });
 
-type Column = "video_id" | "status" | "time";
+type Column = "video_id" | "status" | "time" | "title";
 interface Order {
   column: Column,
   is_descending: boolean,
@@ -56,8 +57,22 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
   return sort_order.value.is_descending;
 }
 
+class Row {
+  state: YtdlpRow;
+  metadata: ComputedRef<VideoItem | undefined>;
+
+  constructor(state: YtdlpRow) {
+    const video_id = state.video_id;
+    this.state = state;
+    void cached_api.get_youtube_video(video_id);
+    this.metadata = computed(() => {
+      return cached_api.youtube_videos[video_id];
+    });
+  }
+}
+
 const items = computed(() => {
-  return Object.values(cached_api.downloads).filter(v => v !== undefined);
+  return Object.values(cached_api.downloads).filter(v => v !== undefined).map(v => new Row(v));
 });
 
 const sorted_items = computed(() => {
@@ -66,15 +81,28 @@ const sorted_items = computed(() => {
   const sorted_items = [...items.value];
   switch (column) {
     case "video_id": {
-      sorted_items.sort((a, b) => a.video_id.localeCompare(b.video_id));
+      sorted_items.sort((a, b) => a.state.video_id.localeCompare(b.state.video_id));
       break;
     }
     case "status": {
-      sorted_items.sort((a, b) => a.status.localeCompare(b.status));
+      sorted_items.sort((a, b) => a.state.status.localeCompare(b.state.status));
       break;
     }
     case "time": {
-      sorted_items.sort((a, b) => a.unix_time.getTime()-b.unix_time.getTime());
+      sorted_items.sort((a, b) => a.state.unix_time.getTime()-b.state.unix_time.getTime());
+      break;
+    }
+    case "title": {
+      sorted_items.sort((a, b) => {
+        const a_metadata = a.metadata.value;
+        const b_metadata = b.metadata.value;
+        if (a_metadata !== undefined && b_metadata !== undefined) {
+          return a_metadata.snippet.title.localeCompare(b_metadata.snippet.title);
+        }
+        if (a_metadata !== undefined && b_metadata === undefined) return -1;
+        if (a_metadata === undefined && b_metadata !== undefined) return 1;
+        return 0;
+      });
       break;
     }
   }
@@ -89,12 +117,13 @@ const sorted_items = computed(() => {
 <template>
 <div class="inline-flex w-full justify-between py-1">
   <h1 class="text-xl font-bold">Downloads ({{ sorted_items.length }})</h1>
-  <button class="btn btn-sm" @click="cached_api.get_downloads(true)">Refresh</button>
+  <button class="btn btn-sm px-1" @click="cached_api.get_downloads(true)"><RefreshCwIcon class="size-5"/></button>
 </div>
 <DownloadProgressBar v-if="shared_app.selected_download_key !== null" :download_key="shared_app.selected_download_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">
     <colgroup>
+      <col class="w-px"/>
       <col class="w-px"/>
       <col class="w-px"/>
       <col class="w-full"/>
@@ -130,6 +159,14 @@ const sorted_items = computed(() => {
             </div>
           </div>
         </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Title</div>
+            <div @click="click_sort_column('title')">
+              <SortIcon :is_descending="get_sort_icon_mode('title')"/>
+            </div>
+          </div>
+        </th>
         <th>Audio</th>
         <th>Stdout</th>
         <th>Stderr</th>
@@ -138,7 +175,7 @@ const sorted_items = computed(() => {
       </tr>
     </thead>
     <tbody>
-      <template v-for="(item, index) in sorted_items" :key="index">
+      <template v-for="({ state: item, metadata }, index) in sorted_items" :key="index">
         <tr
           class="hover:bg-base-300 cursor-pointer"
           :class="get_selected_class(item)"
@@ -147,6 +184,10 @@ const sorted_items = computed(() => {
           <th>{{ item.video_id }}</th>
           <td>{{ item.status }}</td>
           <td>{{ format_datetime(item.unix_time) }}</td>
+          <td>
+            <template v-if="metadata.value !== undefined">{{ metadata.value.snippet.title }}</template>
+            <template v-else>...</template>
+          </td>
           <td>
             <AudioPlayer v-if="item.audio_path" :url="create_data_url(item.audio_path)"/>
           </td>
@@ -173,7 +214,7 @@ const sorted_items = computed(() => {
         </tr>
       </template>
       <template v-if="sorted_items.length === 0">
-        <td colspan="8" class="text-center"><span class="text-nowrap">No downloads</span></td>
+        <td colspan="9" class="text-center"><span class="text-nowrap">No downloads</span></td>
       </template>
     </tbody>
   </table>
