@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { type PlaylistId, type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
-import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
+import { type TranscodeKey, type WorkerStatus } from "../api/ytdlp_api_schema.ts";
 import { type ComputedRef, computed, ref } from "vue";
 import { convert_dhms_to_string, format_date, type DHMS } from "../utility/format.ts";
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
@@ -17,17 +17,45 @@ const props = defineProps<{
   playlist_id: PlaylistId,
 }>();
 
-// fetch row
 const is_hide_duplicate_videos = ref(true);
 
-type Status = "downloading" | "transcoding" | "download_ready";
-function get_status_value(status: Status): number {
+// granular ordering of transcode requests
+type Phase =
+  { type: "downloading", status?: WorkerStatus } |
+  { type: "transcoding", status?: WorkerStatus } |
+  { type: "download_ready" };
+
+function get_worker_status_value(status?: WorkerStatus): number {
   switch (status) {
-    case "downloading": return 0;
-    case "transcoding": return 1;
-    case "download_ready": return 2;
-    default: return -1;
+    case undefined: return 0;
+    case "queued": return 1;
+    case "running": return 2;
+    case "failed": return 3;
+    case "finished": return 4;
   }
+}
+
+function get_phase_value(phase: Phase): number {
+  switch (phase.type) {
+    case "downloading": return get_worker_status_value(phase.status);
+    case "transcoding": return get_worker_status_value(phase.status) + 10;
+    case "download_ready": return 20;
+  }
+}
+
+function get_phase(video_id: VideoId): Phase {
+  const download_state = cached_api.download_state[video_id];
+  if (download_state?.worker_status !== "finished") {
+    return { type: "downloading", status: download_state?.worker_status };
+  }
+
+  const transcode_key: TranscodeKey = { video_id, audio_ext: shared_app.youtube_search_bar.audio_ext };
+  const hash = get_transcode_key_hash(transcode_key);
+  const transcode_state = cached_api.transcode_state[hash];
+  if (transcode_state?.worker_status !== "finished") {
+    return { type: "transcoding", status: transcode_state?.worker_status };
+  }
+  return { type: "download_ready" };
 }
 
 class Row {
@@ -35,7 +63,7 @@ class Row {
   video_id: VideoId;
   playlist_item: PlaylistItem;
   video_item: ComputedRef<VideoItem | undefined>;
-  status: ComputedRef<Status>;
+  phase: ComputedRef<Phase>;
   video_error: ComputedRef<string | undefined>;
 
   constructor(index: number, item: PlaylistItem) {
@@ -43,24 +71,9 @@ class Row {
     this.index = index;
     this.video_id = video_id;
     this.playlist_item = item;
-    this.video_item = computed(() => {
-      const video = cached_api.youtube_videos[this.video_id];
-      return video;
-    });
-    this.status = computed((): Status => {
-      const download_state = cached_api.download_state[video_id];
-      if (download_state?.worker_status !== "finished") return "downloading";
-
-      const transcode_key: TranscodeKey = { video_id, audio_ext: shared_app.youtube_search_bar.audio_ext };
-      const hash = get_transcode_key_hash(transcode_key);
-      const transcode_state = cached_api.transcode_state[hash];
-      if (transcode_state?.worker_status !== "finished") return "transcoding";
-      return "download_ready";
-    });
-    this.video_error = computed(() => {
-      const video = cached_api.youtube_videos_error[this.video_id];
-      return video;
-    });
+    this.video_item = computed(() => cached_api.youtube_videos[this.video_id]);
+    this.phase = computed(() => get_phase(this.video_id));
+    this.video_error = computed(() => cached_api.youtube_videos_error[this.video_id]);
     void cached_api.get_youtube_video(video_id);
   }
 }
@@ -68,9 +81,7 @@ class Row {
 const rows = computed(() => {
   const playlist_items = cached_api.youtube_playlists[props.playlist_id];
   if (playlist_items === undefined) return [];
-  return playlist_items.map((item, index) => {
-    return new Row(index, item);
-  });
+  return playlist_items.map((item, index) => new Row(index, item));
 });
 
 // sort rows
@@ -148,7 +159,7 @@ const sorted_rows = computed(() => {
     }
     case "status": {
       items.sort(sort_out_missing_youtube_metadata((_a_metadata, _b_metadata, a, b) => {
-        return get_status_value(a.status.value)-get_status_value(b.status.value);
+        return get_phase_value(a.phase.value)-get_phase_value(b.phase.value);
       }));
       break;
     }
