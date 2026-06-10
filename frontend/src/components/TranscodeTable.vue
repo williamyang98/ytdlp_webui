@@ -74,10 +74,10 @@ class Row {
   constructor(state: FfmpegRow) {
     const video_id = state.video_id;
     this.state = state;
-    void cached_api.get_youtube_video(video_id);
     this.metadata = computed(() => {
       return cached_api.youtube_videos[video_id];
     });
+    void cached_api.get_youtube_video(video_id);
   }
 }
 

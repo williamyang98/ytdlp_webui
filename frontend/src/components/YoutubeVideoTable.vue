@@ -18,7 +18,7 @@ const video = computed(() => {
 });
 
 onMounted(() => {
-  void cached_api.get_youtube_video(props.video_id, false);
+  void cached_api.get_youtube_video(props.video_id);
 });
 
 const thumbnail_link = computed(() => {
@@ -88,5 +88,8 @@ const youtube_link = computed(() => {
       </div>
     </div>
   </details>
+</template>
+<template v-else>
+  <div class="w-full text-center">No information available</div>
 </template>
 </template>
