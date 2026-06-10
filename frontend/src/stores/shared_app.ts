@@ -5,7 +5,7 @@ import {
 import { type PlaylistId, type VideoId } from "../api/youtube_api_schema.ts";
 import { ref, computed, watch } from "vue";
 import { create_youtube_link, create_youtube_playlist_link, parse_youtube_url, type YoutubeUrlParseResult } from "../utility/youtube_url.ts";
-import { use_cached_api_store } from "../stores/cached_api.ts";
+import { get_transcode_key_hash, use_cached_api_store } from "../stores/cached_api.ts";
 import { defineStore } from "pinia";
 
 export interface SearchBar {
@@ -56,6 +56,18 @@ export const use_shared_app_store = defineStore("shared_app", () => {
     select_youtube_video(video_id);
   }
 
+  // attempt to see if there is a pre-existing finished or ongoing download and focus on it
+  function try_focus_pending_request(key: TranscodeKey): boolean {
+    const download = cached_api.downloads[key.video_id];
+    const hash = get_transcode_key_hash(key);
+    const transcode = cached_api.transcodes[hash];
+    if (download === undefined && transcode === undefined) {
+      return false;
+    }
+    pending_request.value = key;
+    return true;
+  }
+
   const url = computed(() => youtube_search_bar.value.url);
   watch(url, (url) => {
     // clear url
@@ -70,8 +82,14 @@ export const use_shared_app_store = defineStore("shared_app", () => {
     const result = parse_youtube_url(url);
     if (result.video_id !== undefined) {
       if (result.video_id !== youtube_url_parse_result.value.video_id) {
-        pending_request.value = null;
         select_youtube_video(result.video_id);
+        const transcode_key: TranscodeKey = {
+          video_id: result.video_id,
+          audio_ext: youtube_search_bar.value.audio_ext,
+        };
+        if (!try_focus_pending_request(transcode_key)) {
+          pending_request.value = null;
+        }
       }
     } else {
       selected_youtube_video.value = null;
@@ -102,6 +120,7 @@ export const use_shared_app_store = defineStore("shared_app", () => {
     select_youtube_playlist_item,
     select_download,
     select_transcode,
+    try_focus_pending_request,
   };
 });
 
