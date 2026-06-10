@@ -95,6 +95,8 @@ export const use_cached_api_store = defineStore("cached_api", () => {
   const youtube_playlists: Cache<PlaylistItem[]> = ref({});
   const youtube_videos_error: Cache<string> = ref({});
   const youtube_playlists_error: Cache<string> = ref({});
+  const youtube_videos_promise: Cache<Promise<VideoItem>> = ref({});
+  const youtube_playlists_promise: Cache<Promise<PlaylistItem[]>> = ref({});
 
   async function get_transcodes(force?: boolean) {
     if (force !== true) {
@@ -153,53 +155,71 @@ export const use_cached_api_store = defineStore("cached_api", () => {
   }
 
   async function get_youtube_video(video_id: VideoId, force?: boolean) {
-    const old_value = youtube_videos.value[video_id];
-    const old_error = youtube_videos_error.value[video_id];
-    if (force !== true) {
-      if (old_value !== undefined) {
-        return old_value;
-      }
-      if (old_error !== undefined) {
-        throw new Error(old_error);
-      }
+    const old_promise = youtube_videos_promise.value[video_id];
+    if (force !== true && old_promise !== undefined) {
+      return await old_promise;
     }
+    const new_promise_runner = async () => {
+      const old_value = youtube_videos.value[video_id];
+      const old_error = youtube_videos_error.value[video_id];
+      if (force !== true) {
+        if (old_value !== undefined) {
+          return old_value;
+        }
+        if (old_error !== undefined) {
+          throw new Error(old_error);
+        }
+      }
 
-    try {
-      const new_value = await api.get_youtube_video(video_id, force);
-      youtube_videos.value[video_id] = new_value;
-      if (old_error !== undefined) {
-        delete youtube_videos_error.value[video_id]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+      try {
+        const new_value = await api.get_youtube_video(video_id, force);
+        youtube_videos.value[video_id] = new_value;
+        if (old_error !== undefined) {
+          delete youtube_videos_error.value[video_id]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+        }
+        return new_value;
+      } catch (error: unknown) {
+        youtube_videos_error.value[video_id] = String(error);
+        throw error;
       }
-      return new_value;
-    } catch (error: unknown) {
-      youtube_videos_error.value[video_id] = String(error);
-      throw error;
-    }
+    };
+    const new_promise = new_promise_runner();
+    youtube_videos_promise.value[video_id] = new_promise;
+    return await new_promise;
   }
 
   async function get_youtube_playlist(playlist_id: PlaylistId, force?: boolean) {
-    const old_value = youtube_playlists.value[playlist_id];
-    const old_error = youtube_playlists_error.value[playlist_id];
-    if (force !== true) {
-      if (old_value !== undefined) {
-        return old_value;
-      }
-      if (old_error !== undefined) {
-        throw new Error(old_error);
-      }
+    const old_promise = youtube_playlists_promise.value[playlist_id];
+    if (force !== true && old_promise !== undefined) {
+      return await old_promise;
     }
+    const new_promise_runner = async () => {
+      const old_value = youtube_playlists.value[playlist_id];
+      const old_error = youtube_playlists_error.value[playlist_id];
+      if (force !== true) {
+        if (old_value !== undefined) {
+          return old_value;
+        }
+        if (old_error !== undefined) {
+          throw new Error(old_error);
+        }
+      }
 
-    try {
-      const new_value = await api.get_youtube_playlist(playlist_id, force);
-      youtube_playlists.value[playlist_id] = new_value;
-      if (old_error !== undefined) {
-        delete youtube_playlists_error.value[playlist_id]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+      try {
+        const new_value = await api.get_youtube_playlist(playlist_id, force);
+        youtube_playlists.value[playlist_id] = new_value;
+        if (old_error !== undefined) {
+          delete youtube_playlists_error.value[playlist_id]; // eslint-disable-line @typescript-eslint/no-dynamic-delete
+        }
+        return new_value;
+      } catch (error: unknown) {
+        youtube_playlists_error.value[playlist_id] = String(error);
+        throw error;
       }
-      return new_value;
-    } catch (error: unknown) {
-      youtube_playlists_error.value[playlist_id] = String(error);
-      throw error;
-    }
+    };
+    const new_promise = new_promise_runner();
+    youtube_playlists_promise.value[playlist_id] = new_promise;
+    return await new_promise;
   }
 
   function start_transcode_background_worker(key: TranscodeKey, restart_if_idle?: boolean) {
@@ -272,6 +292,8 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     youtube_playlists,
     youtube_videos_error,
     youtube_playlists_error,
+    youtube_videos_promise,
+    youtube_playlists_promise,
     // actions
     get_transcodes,
     get_transcode,
