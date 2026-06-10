@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
 import { computed } from "vue";
-import { Search } from "lucide-vue-next";
+import { EraserIcon, Search } from "lucide-vue-next";
 import { use_cached_api_store } from "../stores/cached_api.ts";
 import { use_shared_app_store } from "../stores/shared_app.ts";
 
@@ -42,7 +42,7 @@ async function submit() {
 
 <template>
 <div class="flex w-full">
-  <button class="btn rounded-none rounded-l" @click="clear()" :disabled="shared_app.youtube_search_bar.url.length === 0">Clear</button>
+  <button class="btn rounded-none rounded-l px-2" @click="clear()" :disabled="shared_app.youtube_search_bar.url.length === 0"><EraserIcon class="size-5"/></button>
   <div class="grow">
     <label class="input rounded-none w-full" :class="{ 'input-error': error_message !== null}">
       <Search class="text-base-content/50 size-5"/>
