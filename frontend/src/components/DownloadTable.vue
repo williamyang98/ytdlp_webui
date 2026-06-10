@@ -7,21 +7,17 @@ import AudioPlayer from "./AudioPlayer.vue";
 
 import { type YtdlpRow } from "../api/ytdlp_api_schema.ts";
 import { format_datetime } from "../utility/format.ts";
-import { get_data_url } from "../api/api.ts";
+import { create_data_url } from "../api/api.ts";
 import { providers } from "../providers/providers.ts";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
+import { use_cached_api_store } from "../stores/cached_api.ts";
 
+const cached_api = use_cached_api_store();
 const app = providers.app;
 
 const sort_order = ref<Order>({
   column: "time",
   is_descending: true,
-});
-
-const download_state = computed(() => {
-  if (app.selected_download_key === null) return null;
-  const download_worker = app.get_download_worker(app.selected_download_key);
-  return download_worker.state;
 });
 
 type Column = "video_id" | "status" | "time";
@@ -31,11 +27,11 @@ interface Order {
 }
 
 function select_download(row: YtdlpRow) {
-  app.select_download(row.video_id);
+  app.select_download(cached_api, row.video_id);
 }
 
 async function delete_download(row: YtdlpRow) {
-  await app.delete_download(row.video_id);
+  await cached_api.delete_download(row.video_id);
 }
 
 function get_selected_class(row: YtdlpRow): string {
@@ -60,34 +56,42 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
   return sort_order.value.is_descending;
 }
 
+const items = computed(() => {
+  return Object.values(cached_api.downloads).filter(v => v !== undefined);
+});
+
 const sorted_items = computed(() => {
   const column = sort_order.value.column;
   const is_descending = sort_order.value.is_descending;
-  const items = [...app.downloads];
+  const sorted_items = [...items.value];
   switch (column) {
     case "video_id": {
-      items.sort((a, b) => a.video_id.localeCompare(b.video_id));
+      sorted_items.sort((a, b) => a.video_id.localeCompare(b.video_id));
       break;
     }
     case "status": {
-      items.sort((a, b) => a.status.localeCompare(b.status));
+      sorted_items.sort((a, b) => a.status.localeCompare(b.status));
       break;
     }
     case "time": {
-      items.sort((a, b) => a.unix_time.getTime()-b.unix_time.getTime());
+      sorted_items.sort((a, b) => a.unix_time.getTime()-b.unix_time.getTime());
       break;
     }
   }
   if (is_descending) {
-    items.reverse();
+    sorted_items.reverse();
   }
-  return items;
+  return sorted_items;
 });
 
 </script>
 
 <template>
-<DownloadProgressBar v-if="download_state" :state="download_state"/>
+<div class="inline-flex w-full justify-between py-1">
+  <h1 class="text-xl font-bold">Downloads ({{ sorted_items.length }})</h1>
+  <button class="btn btn-sm" @click="cached_api.get_downloads(true)">Refresh</button>
+</div>
+<DownloadProgressBar v-if="app.selected_download_key !== null" :download_key="app.selected_download_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">
     <colgroup>
@@ -144,20 +148,20 @@ const sorted_items = computed(() => {
           <td>{{ item.status }}</td>
           <td>{{ format_datetime(item.unix_time) }}</td>
           <td>
-            <AudioPlayer v-if="item.audio_path" :url="get_data_url(item.audio_path)"/>
+            <AudioPlayer v-if="item.audio_path" :url="create_data_url(item.audio_path)"/>
           </td>
           <td>
-            <a v-if="item.stdout_log_path" class="btn btn-sm px-1" :href="get_data_url(item.stdout_log_path)">
+            <a v-if="item.stdout_log_path" class="btn btn-sm px-1" :href="create_data_url(item.stdout_log_path)">
               <FileTerminal class="size-5"/>
             </a>
           </td>
           <td>
-            <a v-if="item.stderr_log_path" class="btn btn-sm px-1" :href="get_data_url(item.stderr_log_path)">
+            <a v-if="item.stderr_log_path" class="btn btn-sm px-1" :href="create_data_url(item.stderr_log_path)">
               <FileTerminal class="size-5"/>
             </a>
           </td>
           <td>
-            <a v-if="item.system_log_path" class="btn btn-sm px-1" :href="get_data_url(item.system_log_path)">
+            <a v-if="item.system_log_path" class="btn btn-sm px-1" :href="create_data_url(item.system_log_path)">
               <FileTerminal class="size-5"/>
             </a>
           </td>

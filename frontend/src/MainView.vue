@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { MenuIcon } from 'lucide-vue-next';
 import { watch } from "vue";
 import { useRouter, useRoute, RouterView } from 'vue-router';
-import UserDataProvider from "./providers/UserDataProvider.vue";
-import AppProvider from "./providers/AppProvider.vue";
+import { routes } from "./routes/routes.ts";
 import GithubIcon from "./assets/github.svg";
 import DarkModeToggle from "./components/DarkModeToggle.vue";
-import { routes } from "./routes/routes.ts";
+import { MenuIcon } from 'lucide-vue-next';
+// providers
+import UserDataProvider from "./providers/UserDataProvider.vue";
+import AppProvider from "./providers/AppProvider.vue";
+import ToastProvider from './providers/ToastProvider.vue';
 
 const router = useRouter();
 const current_route = useRoute();
@@ -27,6 +29,7 @@ watch(() => current_route.name, (name) => {
 </script>
 
 <template>
+<ToastProvider>
 <AppProvider>
 <UserDataProvider>
 <div class="w-screen h-screen overflow-hidden flex flex-col">
@@ -78,6 +81,7 @@ watch(() => current_route.name, (name) => {
 </div>
 </UserDataProvider>
 </AppProvider>
+</ToastProvider>
 </template>
 
 <style scoped>

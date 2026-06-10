@@ -1,23 +1,38 @@
 <script setup lang="ts">
-import { type DownloadState } from "../api/ytdlp_api_schema.ts";
+import { type DownloadKey } from "../api/ytdlp_api_schema.ts";
+import { use_cached_api_store } from "../stores/cached_api.ts";
 import { convert_dhms_to_string, convert_seconds_to_dhms, convert_to_short_standard_prefix } from "../utility/format.ts";
-import { computed } from "vue";
+import { computed, watch } from "vue";
 
 const props = defineProps<{
-  state: DownloadState | null,
+  download_key: DownloadKey,
 }>();
+const cached_api = use_cached_api_store();
+
+const download_key = computed(() => props.download_key);
+watch(download_key, (download_key) => {
+  const video_id = download_key;
+  cached_api.start_download_background_worker(video_id);
+}, {
+  immediate: true,
+});
+
+const state = computed(() => {
+  const video_id = download_key.value;
+  const download_state = cached_api.download_state[video_id];
+  return download_state;
+});
 
 const width = computed((): number => {
-  const state = props.state;
-  if (state === null) return 0;
-  switch (state.worker_status) {
+  if (state.value === undefined) return 0;
+  switch (state.value.worker_status) {
     case "finished": return 1;
     case "failed": return 1;
     case "queued": return 1;
     case "running": break;
   }
-  let total_bytes = state.total_bytes;
-  let elapsed_bytes = state.downloaded_bytes;
+  let total_bytes = state.value.total_bytes;
+  let elapsed_bytes = state.value.downloaded_bytes;
   if (elapsed_bytes !== undefined && total_bytes !== undefined) {
     total_bytes = Math.max(total_bytes, 1);
     elapsed_bytes = Math.max(elapsed_bytes, 0);
@@ -28,9 +43,8 @@ const width = computed((): number => {
 });
 
 const colour = computed((): string => {
-  const state = props.state;
-  if (state === null) return "";
-  switch (state.worker_status) {
+  if (state.value === undefined) return "";
+  switch (state.value.worker_status) {
     case "finished": return "bg-success";
     case "failed": return "bg-error";
     case "queued": return "bg-warning";
@@ -40,16 +54,15 @@ const colour = computed((): string => {
 });
 
 const status = computed((): string => {
-  const state = props.state;
-  if (state === null) return "No Download";
-  switch (state.worker_status) {
-    case "finished": return state.file_cached ? "Download Finished (cached)" : "Download Finished";
+  if (state.value === undefined) return "No Download";
+  switch (state.value.worker_status) {
+    case "finished": return state.value.file_cached ? "Download Finished (cached)" : "Download Finished";
     case "failed": return "Download Failed";
     case "queued": return "Download Queued";
     case "running": break;
   }
-  let total_bytes = state.total_bytes;
-  let elapsed_bytes = state.downloaded_bytes;
+  let total_bytes = state.value.total_bytes;
+  let elapsed_bytes = state.value.downloaded_bytes;
   if (elapsed_bytes !== undefined && total_bytes !== undefined) {
     total_bytes = Math.max(total_bytes, 0);
     elapsed_bytes = Math.max(elapsed_bytes, 0);
@@ -61,27 +74,26 @@ const status = computed((): string => {
 });
 
 const subtitle = computed((): string | null => {
-  const state = props.state;
-  if (state === null) return "Waiting for download to be queued";
-  if (state.file_cached) return null;
-  switch (state.worker_status) {
-    case "failed": return state.fail_reason || "Failed with unprovided reason";
+  if (state.value === undefined) return "Waiting for download to be queued";
+  if (state.value.file_cached) return null;
+  switch (state.value.worker_status) {
+    case "failed": return state.value.fail_reason || "Failed with unprovided reason";
     case "queued": return "Waiting for download to run";
     case "running": break;
     case "finished":  break;
   }
 
-  if (state.downloaded_bytes === undefined || state.total_bytes === undefined) {
+  if (state.value.downloaded_bytes === undefined || state.value.total_bytes === undefined) {
     return null;
   }
 
-  const { value: elapsed_bytes, prefix: elapsed_bytes_unit } = convert_to_short_standard_prefix(state.downloaded_bytes);
-  const { value: total_bytes, prefix: total_bytes_unit } = convert_to_short_standard_prefix(state.total_bytes);
+  const { value: elapsed_bytes, prefix: elapsed_bytes_unit } = convert_to_short_standard_prefix(state.value.downloaded_bytes);
+  const { value: total_bytes, prefix: total_bytes_unit } = convert_to_short_standard_prefix(state.value.total_bytes);
 
   let text_prediction = "";
-  if (state.eta_seconds !== undefined && state.speed_bytes) {
-    const { value: speed_bytes, prefix: speed_bytes_unit } = convert_to_short_standard_prefix(state.speed_bytes);
-    const eta_string = convert_dhms_to_string(convert_seconds_to_dhms(state.eta_seconds));
+  if (state.value.eta_seconds !== undefined && state.value.speed_bytes) {
+    const { value: speed_bytes, prefix: speed_bytes_unit } = convert_to_short_standard_prefix(state.value.speed_bytes);
+    const eta_string = convert_dhms_to_string(convert_seconds_to_dhms(state.value.eta_seconds));
     text_prediction = `@ ${speed_bytes.toFixed(2)}${speed_bytes_unit}B/s - (ETA ${eta_string})`;
   } else {
     text_prediction = "- (Unknown estimated time)";
@@ -91,7 +103,7 @@ const subtitle = computed((): string | null => {
   return text;
 });
 
-const subtitle_colour = computed(() => props.state?.worker_status === "failed" ? "text-error-content" : "");
+const subtitle_colour = computed(() => state.value?.worker_status === "failed" ? "text-error-content" : "");
 </script>
 
 <template>

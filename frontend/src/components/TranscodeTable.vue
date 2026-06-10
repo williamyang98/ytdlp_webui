@@ -5,22 +5,18 @@ import { FileTerminal, Trash2 } from "lucide-vue-next";
 import AudioPlayer from "./AudioPlayer.vue";
 import { type TranscodeKey, type FfmpegRow } from "../api/ytdlp_api_schema.ts";
 import { format_datetime } from "../utility/format.ts";
-import { get_data_url } from "../api/api.ts";
+import { create_data_url } from "../api/api.ts";
 import { ref, computed } from "vue";
-import { providers } from "../providers/providers.ts";
 import { is_worker_running } from "../api/ytdlp_api_schema.ts";
+import { use_cached_api_store } from "../stores/cached_api.ts";
+import { providers } from "../providers/providers.ts";
 
+const cached_api = use_cached_api_store();
 const app = providers.app;
 
 const sort_order = ref<Order>({
   column: "time",
   is_descending: true,
-});
-
-const transcode_state = computed(() => {
-  if (app.selected_transcode_key === null) return null;
-  const transcode_worker = app.get_transcode_worker(app.selected_transcode_key);
-  return transcode_worker.state;
 });
 
 type Column = "video_id" | "audio_ext" | "status" | "time";
@@ -34,7 +30,7 @@ function select_transcode(row: FfmpegRow) {
     video_id: row.video_id,
     audio_ext: row.audio_ext,
   };
-  app.select_transcode(key);
+  app.select_transcode(cached_api, key);
 }
 
 async function delete_transcode(row: FfmpegRow) {
@@ -42,7 +38,7 @@ async function delete_transcode(row: FfmpegRow) {
     video_id: row.video_id,
     audio_ext: row.audio_ext,
   };
-  await app.delete_transcode(key);
+  await cached_api.delete_transcode(key);
 }
 
 function get_selected_class(row: FfmpegRow): string {
@@ -70,38 +66,46 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
   return sort_order.value.is_descending;
 }
 
+const items = computed(() => {
+  return Object.values(cached_api.transcodes).filter(v => v !== undefined);
+});
+
 const sorted_items = computed(() => {
   const column = sort_order.value.column;
   const is_descending = sort_order.value.is_descending;
-  const items = [...app.transcodes];
+  const sorted_items = [...items.value];
   switch (column) {
     case "video_id": {
-      items.sort((a, b) => a.video_id.localeCompare(b.video_id));
+      sorted_items.sort((a, b) => a.video_id.localeCompare(b.video_id));
       break;
     }
     case "audio_ext": {
-      items.sort((a, b) => a.audio_ext.localeCompare(b.audio_ext));
+      sorted_items.sort((a, b) => a.audio_ext.localeCompare(b.audio_ext));
       break;
     }
     case "status": {
-      items.sort((a, b) => a.status.localeCompare(b.status));
+      sorted_items.sort((a, b) => a.status.localeCompare(b.status));
       break;
     }
     case "time": {
-      items.sort((a, b) => a.unix_time.getTime()-b.unix_time.getTime());
+      sorted_items.sort((a, b) => a.unix_time.getTime()-b.unix_time.getTime());
       break;
     }
   }
   if (is_descending) {
-    items.reverse();
+    sorted_items.reverse();
   }
-  return items;
+  return sorted_items;
 });
 
 </script>
 
 <template>
-<TranscodeProgressBar v-if="transcode_state" :state="transcode_state"/>
+<div class="inline-flex w-full justify-between py-1">
+  <h1 class="text-xl font-bold">Transcodes ({{ sorted_items.length }})</h1>
+  <button class="btn btn-sm" @click="cached_api.get_transcodes(true)">Refresh</button>
+</div>
+<TranscodeProgressBar v-if="app.selected_transcode_key" :transcode_key="app.selected_transcode_key"/>
 <div class="w-full overflow-x-auto">
   <table class="table table-pin-rows table-extra-compact w-full">
     <colgroup>
@@ -168,20 +172,20 @@ const sorted_items = computed(() => {
           <td>{{ item.status }}</td>
           <td>{{ format_datetime(item.unix_time) }}</td>
           <td>
-            <AudioPlayer v-if="item.audio_path" :url="get_data_url(item.audio_path)"/>
+            <AudioPlayer v-if="item.audio_path" :url="create_data_url(item.audio_path)"/>
           </td>
           <td>
-            <a v-if="item.stdout_log_path" class="btn btn-sm px-1" :href="get_data_url(item.stdout_log_path)">
+            <a v-if="item.stdout_log_path" class="btn btn-sm px-1" :href="create_data_url(item.stdout_log_path)">
               <FileTerminal class="size-5"/>
             </a>
           </td>
           <td>
-            <a v-if="item.stderr_log_path" class="btn btn-sm px-1" :href="get_data_url(item.stderr_log_path)">
+            <a v-if="item.stderr_log_path" class="btn btn-sm px-1" :href="create_data_url(item.stderr_log_path)">
               <FileTerminal class="size-5"/>
             </a>
           </td>
           <td>
-            <a v-if="item.system_log_path" class="btn btn-sm px-1" :href="get_data_url(item.system_log_path)">
+            <a v-if="item.system_log_path" class="btn btn-sm px-1" :href="create_data_url(item.system_log_path)">
               <FileTerminal class="size-5"/>
             </a>
           </td>

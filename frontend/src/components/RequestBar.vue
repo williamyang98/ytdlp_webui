@@ -3,8 +3,10 @@ import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
 import { providers } from "../providers/providers.ts";
 import { computed } from "vue";
 import { Search } from "lucide-vue-next";
+import { use_cached_api_store } from "../stores/cached_api.ts";
 
 const app = providers.app;
+const cached_api = use_cached_api_store();
 const request_available = computed(() => {
   const result = app.youtube_url_parse_result;
   return result.video_id !== undefined;
@@ -28,10 +30,8 @@ async function submit() {
       video_id: result.video_id,
       audio_ext: app.youtube_search_bar.audio_ext,
     };
-    await Promise.all([
-      app.request_transcode(key),
-      app.get_youtube_video(key.video_id),
-    ]);
+    await cached_api.request_transcode(key);
+    void cached_api.get_youtube_video(key.video_id);
     app.pending_request = key;
     app.selected_download_key = key.video_id;
     app.selected_transcode_key = key;

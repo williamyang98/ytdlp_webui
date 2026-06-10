@@ -1,65 +1,57 @@
 <script setup lang="ts">
-import { type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
+import { type PlaylistId, type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
 import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
-import * as api from "../api/api.ts";
-import { computed, reactive, ref, watch } from "vue";
+import { type Ref, type ComputedRef, computed, ref } from "vue";
 import { providers } from "../providers/providers.ts";
-import { type Playlist } from "../providers/app.ts";
 import { convert_dhms_to_string, format_date, type DHMS } from "../utility/format.ts";
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
 import { DownloadIcon, RefreshCwIcon, SettingsIcon } from "lucide-vue-next";
 import SortIcon from "./SortIcon.vue";
+import { use_cached_api_store } from "../stores/cached_api.ts";
 
 const app = providers.app;
+const cached_api = use_cached_api_store();
 const props = defineProps<{
-  playlist: Playlist,
+  playlist_id: PlaylistId,
 }>();
 
 // fetch row
-const rows = ref<Row[]>([]);
 const is_hide_duplicate_videos = ref(true);
 
 class Row {
   index: number;
   video_id: VideoId;
   playlist_item: PlaylistItem;
-  video_item: VideoItem | null;
-  is_fetch_error: boolean;
-  promise: Promise<void> | null;
+  video_item: ComputedRef<VideoItem | undefined>;
+  error: Ref<string | null>;
+  promise: Promise<void>;
 
   constructor(index: number, item: PlaylistItem) {
     this.index = index;
     this.video_id = item.contentDetails.videoId;
     this.playlist_item = item;
-    this.video_item = null;
-    this.is_fetch_error = false;
-    this.promise = null;
-  }
-
-  fetch() {
-    this.promise = this._fetch();
-  }
-
-  async _fetch() {
-    try {
-      this.video_item = await api.get_youtube_video(this.video_id);
-      this.is_fetch_error = false;
-    } catch (error) {
-      console.error(error);
-      this.video_item = null;
-      this.is_fetch_error = true;
-    }
+    this.video_item = computed(() => {
+      const video = cached_api.youtube_videos[this.video_id];
+      return video;
+    });
+    this.error = ref(null);
+    const runner = async () => {
+      try {
+        void await cached_api.get_youtube_video(this.video_id);
+      } catch (error: unknown) {
+        this.error.value = String(error);
+      }
+    };
+    this.promise = runner();
   }
 }
 
-watch(props.playlist, (playlist) => {
-  rows.value = playlist.items.map((item, index) => {
-    const row = reactive(new Row(index, item));
-    row.fetch();
-    return row;
+const rows = computed(() => {
+  const playlist_items = cached_api.youtube_playlists[props.playlist_id];
+  if (playlist_items === undefined) return [];
+  return playlist_items.map((item, index) => {
+    return new Row(index, item);
   });
-}, {
-  immediate: true,
 });
 
 // sort rows
@@ -106,29 +98,29 @@ const sorted_rows = computed(() => {
     }
     case "title": {
       items.sort((a, b) => {
-        if (a.video_item === null || b.video_item === null) return 0;
-        return a.video_item.snippet.title.localeCompare(b.video_item.snippet.title);
+        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
+        return a.video_item.value.snippet.title.localeCompare(b.video_item.value.snippet.title);
       });
       break;
     }
     case "duration": {
       items.sort((a, b) => {
-        if (a.video_item === null || b.video_item === null) return 0;
-        return dhms_to_seconds(a.video_item.contentDetails.duration)-dhms_to_seconds(b.video_item.contentDetails.duration);
+        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
+        return dhms_to_seconds(a.video_item.value.contentDetails.duration)-dhms_to_seconds(b.video_item.value.contentDetails.duration);
       });
       break;
     }
     case "channel": {
       items.sort((a, b) => {
-        if (a.video_item === null || b.video_item === null) return 0;
-        return a.video_item.snippet.channelTitle.localeCompare(b.video_item.snippet.channelTitle);
+        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
+        return a.video_item.value.snippet.channelTitle.localeCompare(b.video_item.value.snippet.channelTitle);
       });
       break;
     }
     case "published_at": {
       items.sort((a, b) => {
-        if (a.video_item === null || b.video_item === null) return 0;
-        return a.video_item.snippet.publishedAt.getTime()-b.video_item.snippet.publishedAt.getTime();
+        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
+        return a.video_item.value.snippet.publishedAt.getTime()-b.video_item.value.snippet.publishedAt.getTime();
       });
       break;
     }
@@ -160,14 +152,14 @@ function get_sort_icon_mode(column: Column): boolean | undefined {
 
 // select playlist item
 function get_playlist_item_class(row: Row): string {
-  const youtube_video = app.youtube_video;
-  if (youtube_video === null) return "";
-  const is_selected = row.video_id === youtube_video.id;
+  const video_id = app.selected_youtube_video;
+  if (video_id === null) return "";
+  const is_selected = row.video_id === video_id;
   return is_selected ? "bg-base-300" : "";
 }
 
 function select_playlist_item(row: Row) {
-  app.select_playlist_item(props.playlist.id, row.video_id);
+  app.select_playlist_item(props.playlist_id, row.video_id);
 }
 
 async function download_all() {
@@ -176,7 +168,7 @@ async function download_all() {
   for (const item of sorted_rows.value) {
     const video_id = item.video_id;
     const key: TranscodeKey = { video_id, audio_ext };
-    promises.push(app.request_transcode(key));
+    promises.push(cached_api.request_transcode(key));
   }
   await Promise.all(promises);
 }
@@ -191,7 +183,7 @@ async function download_all() {
       <button class="btn btn-sm rounded-none rounded-l px-1" @click="download_all"><DownloadIcon class="size-5"/></button>
     </div>
     <div class="tooltip" data-tip="Refresh Playlist">
-      <button class="btn btn-sm rounded-none px-1" @click="app.get_youtube_playlist(playlist.id, true)"><RefreshCwIcon class="size-5"/></button>
+      <button class="btn btn-sm rounded-none px-1" @click="cached_api.get_youtube_playlist(playlist_id, true)"><RefreshCwIcon class="size-5"/></button>
     </div>
     <button class="btn btn-sm rounded-none rounded-r px-1" popovertarget="popover-1" style="anchor-name:--playlist-settings"><SettingsIcon class="size-5"/></button>
     <ul class="dropdown menu w-52 rounded-box bg-base-100 shadow-sm" popover id="popover-1" style="position-anchor:--playlist-settings">
@@ -258,15 +250,15 @@ async function download_all() {
         >
           <th>{{ row.index+1 }}</th>
           <td>{{ row.video_id }}</td>
-          <template v-if="row.video_item !== null">
-            <td>{{ row.video_item.snippet.title }}</td>
-            <td>{{ convert_dhms_to_string(row.video_item.contentDetails.duration) }}</td>
-            <td><span class="text-nowrap">{{ row.video_item.snippet.channelTitle }}</span></td>
-            <td>{{ format_date(row.video_item.snippet.publishedAt) }}</td>
-            <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist.id, row.video_id)">Link</a></td>
+          <template v-if="row.video_item.value !== undefined">
+            <td>{{ row.video_item.value.snippet.title }}</td>
+            <td>{{ convert_dhms_to_string(row.video_item.value.contentDetails.duration) }}</td>
+            <td><span class="text-nowrap">{{ row.video_item.value.snippet.channelTitle }}</span></td>
+            <td>{{ format_date(row.video_item.value.snippet.publishedAt) }}</td>
+            <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist_id, row.video_id)">Link</a></td>
           </template>
-          <template v-else-if="row.is_fetch_error">
-            <td colspan="5"><span class="text-nowrap text-error font-medium">Error fetching video information</span></td>
+          <template v-else-if="row.error.value !== null">
+            <td colspan="5"><span class="text-nowrap text-error font-medium">Error fetching video information: {{ row.error.value }}</span></td>
           </template>
           <template v-else>
             <td colspan="5"><span class="text-nowrap font-light">Loading ...</span></td>

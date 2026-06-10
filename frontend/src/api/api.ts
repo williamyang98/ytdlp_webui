@@ -127,11 +127,11 @@ export async function get_youtube_playlist(id: PlaylistId, force_refresh?: boole
   return state;
 }
 
-export function get_data_url(relative_path: string): string {
+export function create_data_url(relative_path: string): string {
   return `${BASE_URL}/data/${relative_path}`;
 }
 
-export function get_download_link(video_id: VideoId, audio_ext: AudioExtension, name: string): string {
+export function create_download_link(video_id: VideoId, audio_ext: AudioExtension, name: string): string {
   const param_name = encodeURIComponent(name);
   return `${BASE_URL}/${API_URL}/get_download_link/${video_id}/${audio_ext}?name=${param_name}`;
 }

@@ -1,23 +1,37 @@
 <script setup lang="ts">
-import { type TranscodeState } from "../api/ytdlp_api_schema.ts";
+import { type TranscodeKey, type TranscodeState } from "../api/ytdlp_api_schema.ts";
+import { get_transcode_key_hash, use_cached_api_store } from "../stores/cached_api.ts";
 import { convert_dhms_to_string, convert_seconds_to_dhms } from "../utility/format.ts";
 import { ref, computed, watch } from "vue";
 
 const props = defineProps<{
-  state: TranscodeState | null,
+  transcode_key: TranscodeKey,
 }>();
+const cached_api = use_cached_api_store();
+
+const transcode_key = computed(() => props.transcode_key);
+watch(transcode_key, (transcode_key) => {
+  cached_api.start_transcode_background_worker(transcode_key);
+}, {
+  immediate: true,
+});
+
+const state = computed(() => {
+  const hash = get_transcode_key_hash(transcode_key.value);
+  const transcode_state = cached_api.transcode_state[hash];
+  return transcode_state;
+});
 
 const width = computed((): number => {
-  const state = props.state;
-  if (state === null) return 0;
-  switch (state.worker_status) {
+  if (state.value === undefined) return 0;
+  switch (state.value.worker_status) {
     case "finished": return 1;
     case "failed": return 1;
     case "queued": return 1;
     case "running": break;
   }
-  let total_milliseconds = state.source_duration_milliseconds;
-  let elapsed_milliseconds = state.transcode_duration_milliseconds;
+  let total_milliseconds = state.value.source_duration_milliseconds;
+  let elapsed_milliseconds = state.value.transcode_duration_milliseconds;
   if (elapsed_milliseconds !== undefined && total_milliseconds !== undefined) {
     total_milliseconds = Math.max(total_milliseconds, 1);
     elapsed_milliseconds = Math.max(elapsed_milliseconds, 0);
@@ -28,9 +42,8 @@ const width = computed((): number => {
 });
 
 const colour = computed((): string => {
-  const state = props.state;
-  if (state === null) return "";
-  switch (state.worker_status) {
+  if (state.value === undefined) return "";
+  switch (state.value.worker_status) {
     case "finished": return "bg-success";
     case "failed": return "bg-error";
     case "queued": return "bg-warning";
@@ -40,16 +53,15 @@ const colour = computed((): string => {
 });
 
 const status = computed((): string => {
-  const state = props.state;
-  if (state === null) return "No Transcode";
-  switch (state.worker_status) {
-    case "finished": return state.file_cached ? "Transcode Finished (cached)" : "Transcode Finished";
+  if (state.value === undefined) return "No Transcode";
+  switch (state.value.worker_status) {
+    case "finished": return state.value.file_cached ? "Transcode Finished (cached)" : "Transcode Finished";
     case "failed": return "Transcode Failed";
     case "queued": return "Transcode Queued";
     case "running": break;
   }
-  const total_milliseconds = state.source_duration_milliseconds;
-  const elapsed_milliseconds = state.transcode_duration_milliseconds;
+  const total_milliseconds = state.value.source_duration_milliseconds;
+  const elapsed_milliseconds = state.value.transcode_duration_milliseconds;
   if (elapsed_milliseconds !== undefined && total_milliseconds !== undefined) {
     const elapsed_dhms = convert_seconds_to_dhms(elapsed_milliseconds/1000);
     const total_dhms = convert_seconds_to_dhms(total_milliseconds/1000);
@@ -61,8 +73,8 @@ const status = computed((): string => {
 });
 
 const subtitle = ref<string | null>(null);
-function update_subtitle(new_state: TranscodeState | null, old_state: TranscodeState | null): string | null {
-  if (new_state === null) return "Waiting for transcode to be queued";
+function update_subtitle(new_state: TranscodeState | undefined, old_state: TranscodeState | undefined): string | null {
+  if (new_state === undefined) return "Waiting for transcode to be queued";
   if (new_state.file_cached) return null;
   switch (new_state.worker_status) {
     case "failed": return new_state.fail_reason || "Failed with unprovided reason";
@@ -108,7 +120,7 @@ function update_subtitle(new_state: TranscodeState | null, old_state: TranscodeS
   let measure_time_start_seconds = new_state.start_time_unix.getTime()/1000;
   const measure_time_end_seconds = new_state.end_time_unix.getTime()/1000;
   // try to use most recent measurement for more accurate speed estimate
-  if (old_state !== null && old_state.id === new_state.id) {
+  if (old_state !== undefined && old_state.id === new_state.id) {
     if (old_state.transcode_duration_milliseconds !== undefined) {
       measure_duration_start_seconds = old_state.transcode_duration_milliseconds/1000;
       measure_time_start_seconds = old_state.end_time_unix.getTime()/1000;
@@ -127,12 +139,12 @@ function update_subtitle(new_state: TranscodeState | null, old_state: TranscodeS
   const text = `${text_time_progress} @ ${estimated_transcode_speed_string}/s (ETA ${eta_seconds_string})`
   return text;
 }
-const state = computed(() => props.state);
+
 watch(state, (new_state, old_state) => {
   subtitle.value = update_subtitle(new_state, old_state);
 });
 
-const subtitle_colour = computed(() => props.state?.worker_status === "failed" ? "text-error-content" : "");
+const subtitle_colour = computed(() => state.value?.worker_status === "failed" ? "text-error-content" : "");
 </script>
 
 <template>

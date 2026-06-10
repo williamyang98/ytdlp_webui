@@ -5,30 +5,34 @@ import DownloadProgressBar from "./DownloadProgressBar.vue";
 import { type TranscodeKey } from "../api/ytdlp_api_schema.ts";
 import { type VideoItem } from "../api/youtube_api_schema.ts";
 import { sanitise_to_filepath } from "../utility/format.ts";
-import { providers } from "../providers/providers.ts";
-import { get_download_link } from "../api/api.ts";
+import { create_download_link } from "../api/api.ts";
 import { HardDriveDownloadIcon } from "lucide-vue-next";
+import { use_cached_api_store, get_transcode_key_hash } from "../stores/cached_api.ts";
 
 const props = defineProps<{
   pending_request: TranscodeKey,
 }>();
 
-const app = providers.app;
-const youtube_video = computed(() => app.youtube_video);
+const cached_api = use_cached_api_store();
+const youtube_video = computed(() => {
+  const video_id = props.pending_request.video_id;
+  void cached_api.get_youtube_video(video_id);
+  const youtube_video = cached_api.youtube_videos[video_id];
+  if (youtube_video === undefined) return null;
+  return youtube_video;
+});
 
 const download_name = ref<string>("");
 
-const download_state = computed(() => {
-  const download_worker = app.get_download_worker(props.pending_request.video_id);
-  return download_worker.state;
-});
-
 const transcode_state = computed(() => {
-  const transcode_worker = app.get_transcode_worker(props.pending_request);
-  return transcode_worker.state;
+  const hash = get_transcode_key_hash(props.pending_request);
+  const transcode_state = cached_api.transcode_state[hash];
+  return transcode_state;
 });
 
-const is_download_ready = computed(() => transcode_state.value?.worker_status === "finished");
+const is_download_ready = computed(() => {
+  return transcode_state.value?.worker_status === "finished";
+});
 
 function set_download_filename_from_youtube_video(youtube_video: VideoItem): boolean {
   if (youtube_video.id !== props.pending_request.video_id) return false;
@@ -45,7 +49,7 @@ function set_download_filename_from_transcode_key(key: TranscodeKey) {
 function download() {
   if (download_name.value.length === 0) return;
   download_name.value = sanitise_to_filepath(download_name.value);
-  const link = get_download_link(props.pending_request.video_id, props.pending_request.audio_ext, download_name.value);
+  const link = create_download_link(props.pending_request.video_id, props.pending_request.audio_ext, download_name.value);
   const elem = document.createElement("a");
   elem.href = link;
   elem.rel = "nofollow";
@@ -59,6 +63,7 @@ watch(youtube_video, (youtube_video) => {
 }, {
   immediate: true,
 });
+
 
 </script>
 
@@ -77,7 +82,7 @@ watch(youtube_video, (youtube_video) => {
     </div>
     <button class="btn rounded-none rounded-r" :disabled="!is_download_ready" @click="download">Download</button>
   </div>
-  <DownloadProgressBar :state="download_state"/>
-  <TranscodeProgressBar :state="transcode_state"/>
+  <DownloadProgressBar :download_key="props.pending_request.video_id"/>
+  <TranscodeProgressBar :transcode_key="props.pending_request"/>
 </div>
 </template>
