@@ -106,6 +106,17 @@ const sorted_rows = computed(() => {
     items = [...rows.value];
   }
 
+  function sort_out_missing_youtube_metadata(compare_function: (a_metadata: VideoItem, b_metadata: VideoItem, a: Row, b: Row) => number) {
+    return (a: Row, b: Row): number => {
+      if (a.video_item.value !== undefined && b.video_item.value !== undefined) {
+        return compare_function(a.video_item.value, b.video_item.value, a, b);
+      }
+      if (a.video_item.value !== undefined && b.video_item.value === undefined) return 1;
+      if (a.video_item.value === undefined && b.video_item.value !== undefined) return -1;
+      return 0;
+    }
+  }
+
   switch (column) {
     case "index": {
       items.sort((a, b) => a.index - b.index);
@@ -116,35 +127,29 @@ const sorted_rows = computed(() => {
       break;
     }
     case "title": {
-      items.sort((a, b) => {
-        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
-        return a.video_item.value.snippet.title.localeCompare(b.video_item.value.snippet.title);
-      });
+      items.sort(sort_out_missing_youtube_metadata((a, b) => a.snippet.title.localeCompare(b.snippet.title)));
       break;
     }
     case "duration": {
-      items.sort((a, b) => {
-        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
-        return dhms_to_seconds(a.video_item.value.contentDetails.duration)-dhms_to_seconds(b.video_item.value.contentDetails.duration);
-      });
+      items.sort(sort_out_missing_youtube_metadata((a, b) => {
+        return dhms_to_seconds(a.contentDetails.duration)-dhms_to_seconds(b.contentDetails.duration);
+      }));
       break;
     }
     case "channel": {
-      items.sort((a, b) => {
-        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
-        return a.video_item.value.snippet.channelTitle.localeCompare(b.video_item.value.snippet.channelTitle);
-      });
+      items.sort(sort_out_missing_youtube_metadata((a, b) => a.snippet.channelTitle.localeCompare(b.snippet.channelTitle)));
       break;
     }
     case "published_at": {
-      items.sort((a, b) => {
-        if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
-        return a.video_item.value.snippet.publishedAt.getTime()-b.video_item.value.snippet.publishedAt.getTime();
-      });
+      items.sort(sort_out_missing_youtube_metadata((a, b) => {
+        return a.snippet.publishedAt.getTime()-b.snippet.publishedAt.getTime();
+      }));
       break;
     }
     case "status": {
-      items.sort((a, b) => get_status_value(a.status.value)-get_status_value(b.status.value));
+      items.sort(sort_out_missing_youtube_metadata((_a_metadata, _b_metadata, a, b) => {
+        return get_status_value(a.status.value)-get_status_value(b.status.value);
+      }));
       break;
     }
   }
