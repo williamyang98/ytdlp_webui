@@ -26,6 +26,15 @@ export const use_user_data_store = defineStore("user_data", () => {
   }
 
   const is_dark_mode = create_boolean_entry("is_dark_mode", false);
+  {
+    // synchronise to system dark mode
+    const dark_mode_query = window.matchMedia("(prefers-color-scheme: dark)");
+    is_dark_mode.value = dark_mode_query.matches;
+    dark_mode_query.addEventListener("change", (ev) => {
+      is_dark_mode.value = ev.matches;
+    });
+  }
+
   return {
     is_dark_mode,
   }
