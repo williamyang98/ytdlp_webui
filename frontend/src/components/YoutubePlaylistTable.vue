@@ -6,8 +6,9 @@ import { convert_dhms_to_string, format_date, type DHMS } from "../utility/forma
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
 import { DownloadIcon, RefreshCwIcon, SettingsIcon } from "lucide-vue-next";
 import SortIcon from "./SortIcon.vue";
-import { use_cached_api_store } from "../stores/cached_api.ts";
+import { get_transcode_key_hash, use_cached_api_store } from "../stores/cached_api.ts";
 import { use_shared_app_store } from "../stores/shared_app.ts";
+import InlineDownloadLink from "./InlineDownloadLink.vue";
 
 const cached_api = use_cached_api_store();
 const shared_app = use_shared_app_store();
@@ -19,22 +20,44 @@ const props = defineProps<{
 // fetch row
 const is_hide_duplicate_videos = ref(true);
 
+type Status = "downloading" | "transcoding" | "download_ready";
+function get_status_value(status: Status): number {
+  switch (status) {
+    case "downloading": return 0;
+    case "transcoding": return 1;
+    case "download_ready": return 2;
+    default: return -1;
+  }
+}
+
 class Row {
   index: number;
   video_id: VideoId;
   playlist_item: PlaylistItem;
   video_item: ComputedRef<VideoItem | undefined>;
+  status: ComputedRef<Status>;
   error: Ref<string | null>;
   promise: Promise<void>;
 
   constructor(index: number, item: PlaylistItem) {
+    const video_id = item.contentDetails.videoId;
     this.index = index;
-    this.video_id = item.contentDetails.videoId;
+    this.video_id = video_id;
     this.playlist_item = item;
     this.video_item = computed(() => {
       const video = cached_api.youtube_videos[this.video_id];
       return video;
     });
+  this.status = computed((): Status => {
+    const download_state = cached_api.download_state[video_id];
+    if (download_state?.worker_status !== "finished") return "downloading";
+
+    const transcode_key: TranscodeKey = { video_id, audio_ext: shared_app.youtube_search_bar.audio_ext };
+    const hash = get_transcode_key_hash(transcode_key);
+    const transcode_state = cached_api.transcode_state[hash];
+    if (transcode_state?.worker_status !== "finished") return "transcoding";
+    return "download_ready";
+  });
     this.error = ref(null);
     const runner = async () => {
       try {
@@ -56,7 +79,7 @@ const rows = computed(() => {
 });
 
 // sort rows
-type Column = "index" | "video_id" | "title" | "duration" | "channel" | "published_at";
+type Column = "index" | "video_id" | "title" | "duration" | "channel" | "published_at" | "status";
 
 interface Order {
   column: Column,
@@ -123,6 +146,10 @@ const sorted_rows = computed(() => {
         if (a.video_item.value === undefined || b.video_item.value === undefined) return 0;
         return a.video_item.value.snippet.publishedAt.getTime()-b.video_item.value.snippet.publishedAt.getTime();
       });
+      break;
+    }
+    case "status": {
+      items.sort((a, b) => get_status_value(a.status.value)-get_status_value(b.status.value));
       break;
     }
   }
@@ -197,7 +224,9 @@ async function download_all() {
     <colgroup>
       <col class="w-px"/>
       <col class="w-px"/>
-      <col class="min-w-50 w-full"/>
+      <col class="w-full"/>
+      <col class="w-px"/>
+      <col class="w-px"/>
       <col class="w-px"/>
       <col class="w-px"/>
       <col class="w-px"/>
@@ -219,6 +248,12 @@ async function download_all() {
           <div class="inline-flex gap-2">
             <div>Title</div>
             <div @click="click_sort_column('title')"><SortIcon :is_descending="get_sort_icon_mode('title')"/></div>
+          </div>
+        </th>
+        <th>
+          <div class="inline-flex gap-2">
+            <div>Status</div>
+            <div @click="click_sort_column('status')"><SortIcon :is_descending="get_sort_icon_mode('status')"/></div>
           </div>
         </th>
         <th>
@@ -250,24 +285,25 @@ async function download_all() {
           @click="select_youtube_playlist_item(row)"
         >
           <th>{{ row.index+1 }}</th>
-          <td>{{ row.video_id }}</td>
+          <td><span class="text-nowrap">{{ row.video_id }}</span></td>
           <template v-if="row.video_item.value !== undefined">
-            <td>{{ row.video_item.value.snippet.title }}</td>
+            <td><div>{{ row.video_item.value.snippet.title }}</div></td>
+            <td><InlineDownloadLink :transcode_key="{ video_id: row.video_id, audio_ext: shared_app.youtube_search_bar.audio_ext }"/></td>
             <td>{{ convert_dhms_to_string(row.video_item.value.contentDetails.duration) }}</td>
             <td><span class="text-nowrap">{{ row.video_item.value.snippet.channelTitle }}</span></td>
             <td>{{ format_date(row.video_item.value.snippet.publishedAt) }}</td>
             <td><a class="link link-primary" :href="create_youtube_playlist_link(playlist_id, row.video_id)">Link</a></td>
           </template>
           <template v-else-if="row.error.value !== null">
-            <td colspan="5"><span class="text-nowrap text-error font-medium">Error fetching video information: {{ row.error.value }}</span></td>
+            <td colspan="6"><span class="text-nowrap text-error font-medium">Error fetching video information: {{ row.error.value }}</span></td>
           </template>
           <template v-else>
-            <td colspan="5"><span class="text-nowrap font-light">Loading ...</span></td>
+            <td colspan="6"><span class="text-nowrap font-light">Loading ...</span></td>
           </template>
         </tr>
       </template>
       <template v-if="sorted_rows.length === 0">
-        <td colspan="7" class="text-center"><span class="text-nowrap">No videos in playlist</span></td>
+        <td colspan="8" class="text-center"><span class="text-nowrap">No videos in playlist</span></td>
       </template>
     </tbody>
   </table>
