@@ -53,13 +53,19 @@ watch(audio_elem, (elem) => {
   });
   elem.addEventListener("loadeddata", () => {
     is_loaded.value = true;
-    total_duration.value = elem.duration;
+    if (Number.isFinite(elem.duration)) {
+      total_duration.value = elem.duration;
+    }
   });
   elem.addEventListener("durationchange", () => {
-    total_duration.value = elem.duration;
+    if (Number.isFinite(elem.duration)) {
+      total_duration.value = elem.duration;
+    }
   });
   elem.addEventListener("timeupdate", () => {
-    current_seek.value = elem.currentTime;
+    if (Number.isFinite(elem.currentTime)) {
+      current_seek.value = elem.currentTime;
+    }
   });
   elem.addEventListener("play", () => {
     is_playing.value = true;
