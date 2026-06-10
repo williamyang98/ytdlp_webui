@@ -6,6 +6,7 @@ import { computed, watch } from "vue";
 
 const props = defineProps<{
   download_key: DownloadKey,
+  hide_subtitle?: boolean,
 }>();
 const cached_api = use_cached_api_store();
 
@@ -117,7 +118,7 @@ const subtitle_colour = computed(() => state.value?.worker_status === "failed" ?
       <span class="text-center align-middle px-2 font-medium text-sm text-nowrap">{{ status }}</span>
     </div>
   </div>
-  <p v-if="subtitle !== null" class="label text-sm text-nowrap px-1" :class="subtitle_colour">{{ subtitle }}</p>
+  <p v-if="!hide_subtitle && subtitle !== null" class="label text-sm text-nowrap px-1" :class="subtitle_colour">{{ subtitle }}</p>
 </div>
 </template>
 
