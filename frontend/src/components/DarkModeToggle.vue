@@ -1,7 +1,8 @@
 <script lang="ts" setup>
-import { providers } from "../providers/providers.ts";
 import { MoonIcon, SunIcon } from 'lucide-vue-next';
-const user_data = providers.user_data.value;
+import { use_user_data_store } from '../stores/user_data';
+
+const user_data = use_user_data_store();
 </script>
 
 <template>

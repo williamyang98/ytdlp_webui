@@ -6,7 +6,6 @@ import GithubIcon from "./assets/github.svg";
 import DarkModeToggle from "./components/DarkModeToggle.vue";
 import { MenuIcon } from 'lucide-vue-next';
 // providers
-import UserDataProvider from "./providers/UserDataProvider.vue";
 import { use_cached_api_store } from "./stores/cached_api.ts";
 import ToastsOverlay from "./components/ToastsOverlay.vue";
 
@@ -35,7 +34,6 @@ watch(() => current_route.name, (name) => {
 </script>
 
 <template>
-<UserDataProvider>
 <ToastsOverlay/>
 <div class="w-screen h-screen overflow-hidden flex flex-col">
   <!-- Navbar -->
@@ -84,7 +82,6 @@ watch(() => current_route.name, (name) => {
     <RouterView/>
   </div>
 </div>
-</UserDataProvider>
 </template>
 
 <style scoped>
