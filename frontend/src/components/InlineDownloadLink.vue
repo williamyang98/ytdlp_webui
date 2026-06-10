@@ -38,24 +38,31 @@ const download_name = computed((): string => {
   return filename;
 });
 
-type Status = "downloading" | "transcoding" | "download_ready";
+type Status =
+  { type: "downloading" } |
+  { type: "transcoding" } |
+  { type: "missing_download_path" } |
+  { type: "download_ready", audio_path: string };
 
 const status = computed((): Status => {
   const video_id = props.transcode_key.video_id;
   const download_state = cached_api.download_state[video_id];
-  if (download_state?.worker_status !== "finished") return "downloading";
+  if (download_state?.worker_status !== "finished") {
+    return { type: "downloading" };
+  }
 
   const hash = get_transcode_key_hash(props.transcode_key);
   const transcode_state = cached_api.transcode_state[hash];
-  if (transcode_state?.worker_status !== "finished") return "transcoding";
+  if (transcode_state?.worker_status !== "finished") {
+    return { type: "transcoding" };
+  }
 
-  return "download_ready";
-});
-
-const audio_path = computed(() => {
-  const hash = get_transcode_key_hash(props.transcode_key);
   const transcode = cached_api.transcodes[hash];
-  return transcode?.audio_path;
+  const audio_path = transcode?.audio_path;
+  if (audio_path === undefined) {
+    return { type: "missing_download_path" };
+  }
+  return { type: "download_ready", audio_path };
 });
 
 function download() {
@@ -69,11 +76,15 @@ function download() {
 </script>
 
 <template>
-<div class="min-w-[9rem] w-full flex flex-col gap-y-1">
-  <template v-if="status === 'downloading'"><DownloadProgressBar :download_key="props.transcode_key.video_id" :hide_subtitle="true"/></template>
-  <template v-else-if="status === 'transcoding'"><TranscodeProgressBar :transcode_key="props.transcode_key" :hide_subtitle="true"/></template>
-  <div v-else-if="status === 'download_ready'" class="flex w-full">
-    <AudioPlayer v-if="audio_path !== undefined" :url="create_data_url(audio_path)" :hide_link="true" :rounded_left="true"/>
+<div class="min-w-[16rem] w-full flex flex-col gap-y-1">
+  <template v-if="status.type === 'downloading'">
+    <DownloadProgressBar :download_key="props.transcode_key.video_id" :hide_subtitle="true"/>
+  </template>
+  <template v-else-if="status.type === 'transcoding' || status.type === 'missing_download_path'">
+    <TranscodeProgressBar :transcode_key="props.transcode_key" :hide_subtitle="true"/>
+  </template>
+  <div v-else-if="status.type === 'download_ready'" class="flex w-full">
+    <AudioPlayer :url="create_data_url(status.audio_path)" :hide_link="true" :rounded_left="true"/>
     <button class="btn btn-sm px-1 rounded-none rounded-r border-l-0" @click.stop="download"><DownloadIcon class="size-5"/></button>
   </div>
 </div>
