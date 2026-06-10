@@ -27,31 +27,33 @@ export const use_shared_app_store = defineStore("shared_app", () => {
 
   const cached_api = use_cached_api_store();
 
-  async function select_youtube_video(video_id: VideoId, force_refresh?: boolean) {
-    await cached_api.get_youtube_video(video_id, force_refresh);
+  function select_youtube_video(video_id: VideoId, force_refresh?: boolean) {
+    void cached_api.get_youtube_video(video_id, force_refresh);
     selected_youtube_video.value = video_id;
   }
 
-  async function select_youtube_playlist(playlist_id: PlaylistId, force_refresh?: boolean) {
-    await cached_api.get_youtube_playlist(playlist_id, force_refresh);
+  function select_youtube_playlist(playlist_id: PlaylistId, force_refresh?: boolean) {
+    void cached_api.get_youtube_playlist(playlist_id, force_refresh);
     selected_youtube_playlist.value = playlist_id;
   }
 
   function select_download(key: DownloadKey) {
     selected_download_key.value = key;
     youtube_search_bar.value.url = create_youtube_link(key);
-    void select_youtube_video(key);
+    select_youtube_video(key);
   }
 
   function select_transcode(key: TranscodeKey) {
     selected_transcode_key.value = key;
     youtube_search_bar.value.url = create_youtube_link(key.video_id);
     youtube_search_bar.value.audio_ext = key.audio_ext;
-    void select_youtube_video(key.video_id);
+    select_youtube_video(key.video_id);
   }
 
   function select_youtube_playlist_item(playlist_id: PlaylistId, video_id: VideoId) {
     youtube_search_bar.value.url = create_youtube_playlist_link(playlist_id, video_id);
+    select_youtube_playlist(playlist_id);
+    select_youtube_video(video_id);
   }
 
   const url = computed(() => youtube_search_bar.value.url);
@@ -69,7 +71,7 @@ export const use_shared_app_store = defineStore("shared_app", () => {
     if (result.video_id !== undefined) {
       if (result.video_id !== youtube_url_parse_result.value.video_id) {
         pending_request.value = null;
-        void select_youtube_video(result.video_id);
+        select_youtube_video(result.video_id);
       }
     } else {
       selected_youtube_video.value = null;
@@ -77,7 +79,7 @@ export const use_shared_app_store = defineStore("shared_app", () => {
     }
     if (result.playlist_id !== undefined) {
       if (result.playlist_id !== youtube_url_parse_result.value.playlist_id) {
-        void select_youtube_playlist(result.playlist_id);
+        select_youtube_playlist(result.playlist_id);
       }
     } else {
       selected_youtube_playlist.value = null;
