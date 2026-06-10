@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { type PlaylistId, type PlaylistItem, type VideoId, type VideoItem } from "../api/youtube_api_schema.ts";
-import { type TranscodeKey, type WorkerStatus } from "../api/ytdlp_api_schema.ts";
+import { type DownloadState, type TranscodeKey, type TranscodeState } from "../api/ytdlp_api_schema.ts";
 import { type ComputedRef, computed, ref } from "vue";
 import { convert_dhms_to_string, format_date, type DHMS } from "../utility/format.ts";
 import { create_youtube_playlist_link } from "../utility/youtube_url.ts";
@@ -21,24 +21,50 @@ const is_hide_duplicate_videos = ref(true);
 
 // granular ordering of transcode requests
 type Phase =
-  { type: "downloading", status?: WorkerStatus } |
-  { type: "transcoding", status?: WorkerStatus } |
+  { type: "downloading", state?: DownloadState } |
+  { type: "transcoding", state?: TranscodeState } |
   { type: "download_ready" };
 
-function get_worker_status_value(status?: WorkerStatus): number {
-  switch (status) {
-    case undefined: return 0;
+function get_download_worker_value(state?: DownloadState): number {
+  if (state === undefined) return 0;
+  switch (state.worker_status) {
     case "queued": return 1;
-    case "running": return 2;
-    case "failed": return 3;
-    case "finished": return 4;
+    case "running": {
+      let progress = 0;
+      if (state.downloaded_bytes !== undefined && state.total_bytes !== undefined) {
+        progress = state.downloaded_bytes / state.total_bytes;
+        progress = Math.max(0, progress)
+        progress = Math.min(1, progress);
+      }
+      return 2 + progress;
+    }
+    case "failed": return 4;
+    case "finished": return 5;
+  }
+}
+
+function get_transcode_worker_value(state?: TranscodeState): number {
+  if (state === undefined) return 0;
+  switch (state.worker_status) {
+    case "queued": return 1;
+    case "running": {
+      let progress = 0;
+      if (state.transcode_duration_milliseconds !== undefined && state.source_duration_milliseconds !== undefined) {
+        progress = state.transcode_duration_milliseconds / state.source_duration_milliseconds;
+        progress = Math.max(0, progress)
+        progress = Math.min(1, progress);
+      }
+      return 2 + progress;
+    }
+    case "failed": return 4;
+    case "finished": return 5;
   }
 }
 
 function get_phase_value(phase: Phase): number {
   switch (phase.type) {
-    case "downloading": return get_worker_status_value(phase.status);
-    case "transcoding": return get_worker_status_value(phase.status) + 10;
+    case "downloading": return get_download_worker_value(phase.state);
+    case "transcoding": return get_transcode_worker_value(phase.state) + 10;
     case "download_ready": return 20;
   }
 }
@@ -46,14 +72,13 @@ function get_phase_value(phase: Phase): number {
 function get_phase(video_id: VideoId): Phase {
   const download_state = cached_api.download_state[video_id];
   if (download_state?.worker_status !== "finished") {
-    return { type: "downloading", status: download_state?.worker_status };
+    return { type: "downloading", state: download_state };
   }
-
   const transcode_key: TranscodeKey = { video_id, audio_ext: shared_app.youtube_search_bar.audio_ext };
   const hash = get_transcode_key_hash(transcode_key);
   const transcode_state = cached_api.transcode_state[hash];
   if (transcode_state?.worker_status !== "finished") {
-    return { type: "transcoding", status: transcode_state?.worker_status };
+    return { type: "transcoding", state: transcode_state };
   }
   return { type: "download_ready" };
 }
@@ -84,6 +109,21 @@ const rows = computed(() => {
   return playlist_items.map((item, index) => new Row(index, item));
 });
 
+const unique_rows = computed(() => {
+  let items = [];
+  if (is_hide_duplicate_videos.value) {
+    const video_id_set = new Set<VideoId>();
+    for (const item of rows.value) {
+      if (video_id_set.has(item.video_id)) continue;
+      video_id_set.add(item.video_id);
+      items.push(item);
+    }
+  } else {
+    items = [...rows.value];
+  }
+  return items;
+});
+
 // sort rows
 type Column = "index" | "video_id" | "title" | "duration" | "channel" | "published_at" | "status";
 
@@ -104,18 +144,7 @@ function dhms_to_seconds(dhms: DHMS): number {
 const sorted_rows = computed(() => {
   const column = sort_order.value.column;
   const is_descending = sort_order.value.is_descending;
-  let items = [];
-
-  if (is_hide_duplicate_videos.value) {
-    const video_id_set = new Set<VideoId>();
-    for (const item of rows.value) {
-      if (video_id_set.has(item.video_id)) continue;
-      video_id_set.add(item.video_id);
-      items.push(item);
-    }
-  } else {
-    items = [...rows.value];
-  }
+  const items = [...unique_rows.value];
 
   function sort_out_missing_youtube_metadata(compare_function: (a_metadata: VideoItem, b_metadata: VideoItem, a: Row, b: Row) => number) {
     return (a: Row, b: Row): number => {
