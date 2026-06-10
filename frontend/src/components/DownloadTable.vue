@@ -183,13 +183,13 @@ const sorted_items = computed(() => {
         >
           <th>{{ item.video_id }}</th>
           <td>{{ item.status }}</td>
-          <td>{{ format_datetime(item.unix_time) }}</td>
+          <td><span class="text-nowrap">{{ format_datetime(item.unix_time) }}</span></td>
           <td>
             <template v-if="metadata.value !== undefined">{{ metadata.value.snippet.title }}</template>
             <template v-else>...</template>
           </td>
           <td>
-            <AudioPlayer v-if="item.audio_path" :url="create_data_url(item.audio_path)"/>
+            <AudioPlayer v-if="item.audio_path" :url="create_data_url(item.audio_path)" :rounded_left="true" :rounded_right="true"/>
           </td>
           <td>
             <a v-if="item.stdout_log_path" class="btn btn-sm px-1" :href="create_data_url(item.stdout_log_path)">
