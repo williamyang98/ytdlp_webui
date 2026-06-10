@@ -7,8 +7,8 @@ import DarkModeToggle from "./components/DarkModeToggle.vue";
 import { MenuIcon } from 'lucide-vue-next';
 // providers
 import UserDataProvider from "./providers/UserDataProvider.vue";
-import ToastProvider from './providers/ToastProvider.vue';
 import { use_cached_api_store } from "./stores/cached_api.ts";
+import ToastsOverlay from "./components/ToastsOverlay.vue";
 
 const router = useRouter();
 const current_route = useRoute();
@@ -35,8 +35,8 @@ watch(() => current_route.name, (name) => {
 </script>
 
 <template>
-<ToastProvider>
 <UserDataProvider>
+<ToastsOverlay/>
 <div class="w-screen h-screen overflow-hidden flex flex-col">
   <!-- Navbar -->
   <div class="navbar bg-base-100 shadow-sm min-h-[3rem] p-1">
@@ -85,7 +85,6 @@ watch(() => current_route.name, (name) => {
   </div>
 </div>
 </UserDataProvider>
-</ToastProvider>
 </template>
 
 <style scoped>

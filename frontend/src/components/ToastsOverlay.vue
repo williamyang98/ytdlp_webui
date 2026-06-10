@@ -1,9 +1,5 @@
 <script lang="ts" setup>
-import { ref, provide } from "vue";
-import { type ToastType, ToastManager } from "./toast.ts";
-
-const manager = ref(new ToastManager());
-provide("toast_manager", manager);
+import { use_toasts_store, type ToastType } from "../stores/toast.ts";
 
 function toast_class(type?: ToastType): string {
   switch (type) {
@@ -15,18 +11,19 @@ function toast_class(type?: ToastType): string {
   }
 }
 
+const toasts = use_toasts_store();
 </script>
 
 <template>
 <div class="toast z-3 overflow-hidden max-h-[50vh]">
-  <template v-for="toast in manager.toasts" :key="toast.id">
+  <template v-for="toast in toasts.toasts" :key="toast.id">
     <div
       class="cursor-pointer alert" :class="toast_class(toast.type)"
-      @click="manager.remove_toast(toast.id)"
+      @click="toasts.remove_toast(toast.id)"
     >
       <span>{{ toast.message }}</span>
     </div>
   </template>
 </div>
-<slot></slot>
 </template>
+
