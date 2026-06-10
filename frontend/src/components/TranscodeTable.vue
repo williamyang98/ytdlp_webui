@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import SortIcon from "./SortIcon.vue";
 import TranscodeProgressBar from "./TranscodeProgressBar.vue";
-import { FileTerminal, RefreshCwIcon, Trash2, TrashIcon } from "lucide-vue-next";
+import { FileTerminal, OctagonAlertIcon, RefreshCwIcon, Trash2, TrashIcon } from "lucide-vue-next";
 import AudioPlayer from "./AudioPlayer.vue";
 import { type TranscodeKey, type FfmpegRow } from "../api/ytdlp_api_schema.ts";
 import { format_datetime } from "../utility/format.ts";
