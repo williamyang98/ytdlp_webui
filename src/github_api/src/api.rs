@@ -43,5 +43,37 @@ impl GithubApi {
             .with_context(|| format!("Failed to parse body into json: {text}"))?;
         Ok(releases)
     }
+
+    pub async fn get_latest_release(&self, owner: &str, repo: &str) -> anyhow::Result<Release> {
+        let url = format!("{0}/repos/{owner}/{repo}/releases/latest", &self.base_url);
+        let response = self.client
+            .get(url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        let text = response
+            .error_for_status()?
+            .text()
+            .await.context("Getting body from response")?;
+        let release: Release = serde_json::from_str(text.as_str())
+            .with_context(|| format!("Failed to parse body into json: {text}"))?;
+        Ok(release)
+    }
+
+    pub async fn get_tagged_release(&self, owner: &str, repo: &str, tag: &str) -> anyhow::Result<Release> {
+        let url = format!("{0}/repos/{owner}/{repo}/releases/tags/{tag}", &self.base_url);
+        let response = self.client
+            .get(url)
+            .headers(self.headers.clone())
+            .send()
+            .await?;
+        let text = response
+            .error_for_status()?
+            .text()
+            .await.context("Getting body from response")?;
+        let release: Release = serde_json::from_str(text.as_str())
+            .with_context(|| format!("Failed to parse body into json: {text}"))?;
+        Ok(release)
+    }
 }
 

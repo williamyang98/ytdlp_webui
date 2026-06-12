@@ -38,3 +38,15 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 - You may have to provide your own Youtube data api v3 key if the provided public key is overused or invalidated
 - Follow the instructions here to get your own api key [https://developers.google.com/youtube/v3/getting-started](https://developers.google.com/youtube/v3/getting-started)
 - Then place it inside your ```.env``` file in the root folder as ```YOUTUBE_API_KEY=INSERT_YOUR_YOUTUBE_API_KEY_HERE``` 
+
+## Updating ytdlp
+- ytdlp might have to be regularly updated whenever youtube changes things, producing errors when attempting to download a youtube video
+- Update yt-dlp to the latest version using the following commands depending on your platform
+- Windows
+    - Method 1: ```cargo run -r --bin download_windows_binaries -- --download-latest-ytdlp```
+    - Method 2: ```./bin/yt-dlp --update```
+- Linux
+    - Method 1: ```pip install --upgrade yt-dlp```
+    - Method 2: ```yt-dlp --update```
+
+
