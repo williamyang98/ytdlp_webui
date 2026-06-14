@@ -9,8 +9,7 @@ use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
 use std::ops::ControlFlow;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use uuid::Uuid;
 use youtube_api::VideoId;
@@ -184,15 +183,17 @@ pub struct DownloadWorkers {
     database: Arc<Database>,
     threadpool: Arc<AppThreadPool>,
     app_config: Arc<AppConfig>,
+    ytdlp: Arc<ytdlp::Ytdlp>,
     cache: DashMap<VideoId, Arc<DownloadWorker>>,
 }
 
 impl DownloadWorkers {
-    pub fn new(database: Arc<Database>, threadpool: Arc<AppThreadPool>, app_config: Arc<AppConfig>) -> Self {
+    pub fn new(database: Arc<Database>, threadpool: Arc<AppThreadPool>, app_config: Arc<AppConfig>, ytdlp: Arc<ytdlp::Ytdlp>) -> Self {
         Self {
             database,
             threadpool,
             app_config,
+            ytdlp,
             cache: DashMap::new(),
         }
     }
@@ -251,13 +252,16 @@ impl DownloadWorkers {
             let database = self.database.clone();
             let app_config = self.app_config.clone();
             let threadpool = self.threadpool.clone();
+            let ytdlp_user_handle = self.ytdlp.try_acquire_user_handle()?;
             let worker = worker.clone();
             move || -> anyhow::Result<()> {
                 // setup process
                 let output_dirpath = app_config.downloads_folder.join(video_id.as_str());
+                let output_dirpath = std::path::absolute(&output_dirpath)
+                    .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_dirpath.to_string_lossy()))?;
                 let mut process = ProcessWorker::new(threadpool.downloads_stdout.clone(), threadpool.downloads_stderr.clone(), &output_dirpath);
                 process.label = Some(format!("download_{0}", video_id.as_str()));
-                let command = create_download_command(&video_id, &output_dirpath, &app_config)?;
+                let command = ytdlp_user_handle.create_download_command(&video_id, &output_dirpath, &app_config.current_working_directory, &app_config.ffmpeg_command);
                 let stdout_handler = Box::new(YtdlpStdoutHandler::new(worker.clone()));
                 let stderr_handler = Box::new(YtdlpStderrHandler::default());
                 process.stdout_handler = Some(stdout_handler.clone());
@@ -365,20 +369,4 @@ impl DownloadWorkers {
         });
         Ok(worker)
     }
-}
-
-fn create_download_command(video_id: &VideoId, output_dirpath: &Path, app_config: &AppConfig) -> anyhow::Result<Command> {
-    let url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
-    // Can't canonicalize since path doesn't exist yet
-    let output_filepath = output_dirpath.join("%(id)s.%(ext)s");
-    let output_filepath = std::path::absolute(&output_filepath)
-        .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
-    let mut command = Command::new(&app_config.ytdlp_command);
-    command.current_dir(&app_config.current_working_directory);
-    command.args(ytdlp::get_ytdlp_arguments(
-        url.as_str(),
-        &app_config.ffmpeg_command.to_string_lossy(),
-        output_filepath.to_str().expect("Failed to turn output filepath into UTF-8 string"),
-    ));
-    Ok(command)
 }

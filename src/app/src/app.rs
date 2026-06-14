@@ -4,6 +4,7 @@ use crate::util::defer;
 use crate::worker_download::{DownloadWorker, DownloadWorkers};
 use crate::worker_transcode::{TranscodeWorker, TranscodeWorkers};
 use crate::youtube_api_cache::YoutubeApiCache;
+use crate::ytdlp::Ytdlp;
 use youtube_api::{PlaylistId, PlaylistItem, VideoId, VideoItem};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -40,7 +41,8 @@ pub struct App {
     _threadpool: Arc<AppThreadPool>,
     transcode_workers: Arc<TranscodeWorkers>,
     download_workers: Arc<DownloadWorkers>,
-    youtube_api_cache: Arc<YoutubeApiCache>
+    youtube_api_cache: Arc<YoutubeApiCache>,
+    ytdlp: Arc<Ytdlp>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,8 +66,9 @@ impl App {
         let database = Arc::new(database);
         database.connect()?.run_pending_migrations();
 
+        let ytdlp = Arc::new(Ytdlp::new(Arc::new(app_config.ytdlp_command.clone())));
         let threadpool = Arc::new(AppThreadPool::new(app_config.total_transcode_threads));
-        let download_workers = Arc::new(DownloadWorkers::new(database.clone(), threadpool.clone(), app_config.clone()));
+        let download_workers = Arc::new(DownloadWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), ytdlp.clone()));
         let transcode_workers = Arc::new(TranscodeWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), download_workers.clone()));
         let youtube_api_cache = Arc::new(YoutubeApiCache::new(app_config.clone())?);
         Ok(Self {
@@ -75,9 +78,9 @@ impl App {
             download_workers,
             transcode_workers,
             youtube_api_cache,
+            ytdlp,
         })
     }
-
 
     pub fn start_transcode(&self, key: &TranscodeKey, video_info: Option<Arc<VideoItem>>) -> anyhow::Result<Arc<TranscodeWorker>> {
         self.transcode_workers.start_worker(key, video_info)
@@ -135,7 +138,7 @@ impl App {
             self.download_workers.delete_worker(video_id);
         });
 
-        let mut db_conn =self.database.connect()?;
+        let mut db_conn = self.database.connect()?;
         let Some(entry) = db_conn.select_ytdlp_entry(video_id)? else {
             return Ok(None);
         };
@@ -165,7 +168,7 @@ impl App {
             self.transcode_workers.delete_worker(key);
         });
 
-        let mut db_conn =self.database.connect()?;
+        let mut db_conn = self.database.connect()?;
         let Some(entry) = db_conn.select_ffmpeg_entry(key)? else {
             return Ok(None);
         };
@@ -242,5 +245,19 @@ impl App {
             return Ok(None);
         }
         Ok(Some(path))
+    }
+
+    pub async fn get_ytdlp_version(&self) -> anyhow::Result<String> {
+        let ytdlp_user_handle = self.ytdlp.try_acquire_user_handle()?;
+        let result = actix_web::web::block(move || ytdlp_user_handle.get_version()).await?;
+        let version = result?;
+        Ok(version)
+    }
+
+    pub async fn update_ytdlp_version(&self) -> anyhow::Result<String> {
+        let ytdlp_update_handle = self.ytdlp.try_acquire_update_handle()?;
+        let result = actix_web::web::block(move || ytdlp_update_handle.update()).await?;
+        let output = result?;
+        Ok(output)
     }
 }

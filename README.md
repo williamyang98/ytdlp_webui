@@ -41,12 +41,7 @@ Download and convert Youtube videos into audio clips. Has a web UI client that w
 
 ## Updating ytdlp
 - ytdlp might have to be regularly updated whenever youtube changes things, producing errors when attempting to download a youtube video
-- Update yt-dlp to the latest version using the following commands depending on your platform
-- Windows
-    - Method 1: ```cargo run -r --bin download_windows_binaries -- --download-latest-ytdlp```
-    - Method 2: ```./bin/yt-dlp --update```
-- Linux
-    - Method 1: ```pip install --upgrade yt-dlp```
-    - Method 2: ```yt-dlp --update```
+- Go to the settings tab on the website and press update for ytdlp
+![Screenshot](./docs/screenshot_update.png)
 
 

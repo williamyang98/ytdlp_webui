@@ -127,6 +127,20 @@ export async function get_youtube_playlist(id: PlaylistId, force_refresh?: boole
   return state;
 }
 
+export async function get_ytdlp_version(): Promise<string> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/ytdlp/version`);
+  if (!response.ok) await handle_bad_response(response);
+  const version = await response.text();
+  return version;
+}
+
+export async function request_ytdlp_update(): Promise<string> {
+  const response = await fetch(`${BASE_URL}/${API_URL}/ytdlp/update`);
+  if (!response.ok) await handle_bad_response(response);
+  const stdout = await response.text();
+  return stdout;
+}
+
 export function create_data_url(relative_path: string): string {
   return `${BASE_URL}/data/${relative_path}`;
 }

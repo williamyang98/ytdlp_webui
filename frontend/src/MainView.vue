@@ -40,7 +40,7 @@ watch(() => current_route.name, (name) => {
   <div class="navbar bg-base-100 shadow-sm min-h-[3rem] p-1">
     <div class="navbar-start w-full sm:w-[50%]">
       <!--Mobile hamburger navigation menu-->
-      <div class="dropdown sm:hidden">
+      <div class="dropdown mobile-hamburger-menu">
         <div tabindex="0" role="button" class="btn btn-ghost py-1 px-2">
           <MenuIcon class="w-[1.5rem] h-[1.5rem]"/>
         </div>
@@ -60,7 +60,7 @@ watch(() => current_route.name, (name) => {
       </div>
     </div>
     <!--Desktop navigation menu-->
-    <div class="navbar-center hidden sm:flex">
+    <div class="navbar-center hidden desktop-menu">
       <ul class="menu menu-horizontal px-1 gap-x-1 z-10 p-0">
         <li v-for="route of routes" :key="route.name">
           <a :href="router.resolve(route.path).href" class="w-full flex flex-row gap-x-2 items-center" :class="{ 'menu-active': route.name === current_route.name }">
@@ -85,9 +85,21 @@ watch(() => current_route.name, (name) => {
 </template>
 
 <style scoped>
+/* Hide title if screen too small */
 @media (width < 22rem) {
-.app-title {
-  display: none;
+  .app-title {
+    display: none;
+  }
 }
+
+/* Toggle between mobile or desktop menu */
+@media (width > 48rem) {
+  .mobile-hamburger-menu {
+    display: none;
+  }
+
+  .desktop-menu {
+    display: flex;
+  }
 }
 </style>

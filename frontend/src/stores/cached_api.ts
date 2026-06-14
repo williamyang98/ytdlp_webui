@@ -97,6 +97,11 @@ export const use_cached_api_store = defineStore("cached_api", () => {
   const youtube_playlists_error: Cache<string> = ref({});
   const youtube_videos_promise: Cache<Promise<VideoItem>> = ref({});
   const youtube_playlists_promise: Cache<Promise<PlaylistItem[]>> = ref({});
+  const ytdlp_version = ref<string | null>(null);
+  const ytdlp_update_log = ref<string | null>(null);
+  const ytdlp_version_promise: Ref<Promise<string> | null> = ref(null);
+  const ytdlp_update_promise: Ref<Promise<string> | null> = ref(null);
+
 
   async function get_transcodes(force?: boolean) {
     if (force !== true) {
@@ -280,6 +285,32 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     return response;
   }
 
+  async function get_ytdlp_version(force?: boolean) {
+    if (force !== true && ytdlp_version_promise.value !== null) {
+      return await ytdlp_version_promise.value;
+    }
+    const runner = async () => {
+      const version = await api.get_ytdlp_version();
+      ytdlp_version.value = version;
+      return version;
+    }
+    ytdlp_version_promise.value = runner();
+    return await ytdlp_version_promise.value;
+  }
+
+  async function request_ytdlp_update(force?: boolean) {
+    if (force !== true && ytdlp_version_promise.value !== null) {
+      return await ytdlp_version_promise.value;
+    }
+    const runner = async () => {
+      const stdout = await api.request_ytdlp_update();
+      ytdlp_update_log.value = stdout;
+      return stdout;
+    }
+    ytdlp_update_promise.value = runner();
+    return await ytdlp_update_promise.value;
+  }
+
   return {
     // states
     transcodes,
@@ -294,6 +325,10 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     youtube_playlists_error,
     youtube_videos_promise,
     youtube_playlists_promise,
+    ytdlp_version,
+    ytdlp_update_log,
+    ytdlp_version_promise,
+    ytdlp_update_promise,
     // actions
     get_transcodes,
     get_transcode,
@@ -306,6 +341,8 @@ export const use_cached_api_store = defineStore("cached_api", () => {
     start_transcode_background_worker,
     start_download_background_worker,
     request_transcode,
+    get_ytdlp_version,
+    request_ytdlp_update,
   }
 });
 

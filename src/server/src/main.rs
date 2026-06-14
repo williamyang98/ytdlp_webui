@@ -107,6 +107,8 @@ async fn main() -> anyhow::Result<()> {
                 .service(routes::get_download_link)
                 .service(routes::get_youtube_video)
                 .service(routes::get_youtube_playlist)
+                .service(routes::request_ytdlp_update)
+                .service(routes::get_ytdlp_version)
             )
             .service(actix_files::Files::new("/data", &app_config.data_folder).show_files_listing())
             .service(actix_files::Files::new("/", &app_config.static_folder).index_file("index.html"))

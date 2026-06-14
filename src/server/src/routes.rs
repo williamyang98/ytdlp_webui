@@ -45,7 +45,7 @@ impl ApiError {
 
     fn internal_server(err: impl std::fmt::Debug) -> Self {
         Self {
-            error: format!("internal server error: {err:?}"),
+            error: format!("{err:?}"),
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -260,5 +260,26 @@ pub async fn get_youtube_playlist(req: HttpRequest, path: web::Path<String>, par
     let force_refresh = params.force_refresh.unwrap_or(false);
     let playlist_info = app.get_youtube_playlist(&playlist_id, force_refresh).await.map_err(ApiError::internal_server)?;
     Ok(HttpResponse::Ok().json(playlist_info.as_ref()))
+}
+
+#[actix_web::get("/ytdlp/update")]
+pub async fn request_ytdlp_update(req: HttpRequest) -> actix_web::Result<HttpResponse> {
+    let app = req.app_data::<Arc<App>>().unwrap().clone();
+    let output = app.update_ytdlp_version().await.map_err(ApiError::internal_server)?;
+    let response = HttpResponse::Ok()
+        .content_type("text/plain")
+        .body(output);
+    Ok(response)
+}
+
+#[actix_web::get("/ytdlp/version")]
+pub async fn get_ytdlp_version(req: HttpRequest) -> actix_web::Result<HttpResponse> {
+    let app = req.app_data::<Arc<App>>().unwrap().clone();
+    let version = app.get_ytdlp_version().await.map_err(ApiError::internal_server)?;
+    log::debug!("getting ytdlp version");
+    let response = HttpResponse::Ok()
+        .content_type("text/plain")
+        .body(version);
+    Ok(response)
 }
 

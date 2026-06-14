@@ -1,36 +1,182 @@
-use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Serialize;
+use thiserror::Error;
 use youtube_api::VideoId;
 
-// NOTE: The ytdlp cli output is not stable, but we can manually format certain outputs
-//       We will then do pattern matching on that controlled output
-pub fn get_ytdlp_arguments<'a>(url: &'a str, ffmpeg_binary_path: &'a str, output_format: &'a str) -> impl IntoIterator<Item=impl AsRef<OsStr> + 'a> {
-    [
-        url,
-        "--extract-audio",
-        "--embed-chapters", // include youtube chapters
-        "--format", "bestaudio",
-        "--no-continue", // override existing files
-        "--no-simulate", // avoid running simulation when changing templates
-        "--ffmpeg-location", ffmpeg_binary_path,
-        // format progress string
-        "--progress", "--newline",
-        "--progress-template", concat!(
-            "@[progress] ",
-            "eta=%(progress.eta)d,elapsed=%(progress.elapsed)d,",
-            "downloaded_bytes=%(progress.downloaded_bytes)d,total_bytes=%(progress.total_bytes)d,",
-            "speed=%(progress.speed)d",
-        ),
-        "--output", output_format, // "%(id)s.%(ext)s", // detect name of audio after command runs
-        "--print", "@[download-path] %(filename)s",
-        "--print", "before_dl:@[before-dl-path] %(filename)s",
-        "--print", "pre_process:@[pre-process-path] %(filename)s",
-        "--print", "post_process:@[post-process-path] %(filename)s",
-        "--print", "after_move:@[after-move-path] %(filename)s",
-        "--verbose", // print extra debug info to stderr
-    ]
+#[derive(Default)]
+struct YtdlpState {
+    is_updating: bool,
+    total_users: usize,
+}
+
+struct YtdlpSemaphore {
+    state: Arc<Mutex<YtdlpState>>,
+    command: Arc<PathBuf>,
+}
+
+impl YtdlpSemaphore {
+    fn new(command: Arc<PathBuf>) -> Self {
+        let state = Arc::new(Mutex::new(YtdlpState::default()));
+        Self { state, command }
+    }
+}
+
+pub struct YtdlpUserHandle {
+    semaphore: Arc<YtdlpSemaphore>,
+}
+
+#[derive(Error,Debug)]
+pub enum YtdlpUserHandleAcquireError {
+    #[error("Update in progress")]
+    UpdateInProgress,
+}
+
+impl YtdlpUserHandle {
+    fn try_acquire(semaphore: &Arc<YtdlpSemaphore>) -> Result<Self, YtdlpUserHandleAcquireError> {
+        let mut state = semaphore.state.lock().unwrap();
+        if state.is_updating {
+            return Err(YtdlpUserHandleAcquireError::UpdateInProgress);
+        }
+        state.total_users += 1;
+        drop(state);
+
+        let semaphore = semaphore.clone();
+        Ok(Self { semaphore })
+    }
+
+    pub fn create_download_command(&self, video_id: &VideoId, output_dirpath: &Path, current_working_directory: &Path, ffmpeg_location: &Path) -> Command {
+        let youtube_url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
+        // Can't canonicalize since path doesn't exist yet
+        let output_filepath = output_dirpath.join("%(id)s.%(ext)s");
+        let mut command = Command::new(self.semaphore.command.as_os_str());
+        command
+            .current_dir(current_working_directory)
+            .arg(youtube_url)
+            .arg("--extract-audio") // output location is printed in stderr as [ExtractAudio] Destination: ...
+            .arg("--verbose") // needed to print output location for --extract-audio
+            .arg("--embed-chapters") // include youtube chapters
+            .args(["--format", "bestaudio"])
+            .arg("--no-continue") // override existing files
+            .arg("--no-simulate") // avoid running simulation when changing templates
+            // format progress string
+            .arg("--newline")
+            .arg("--progress")
+            .args([
+                "--progress-template", concat!(
+                    "@[progress] ",
+                    "eta=%(progress.eta)d,elapsed=%(progress.elapsed)d,",
+                    "downloaded_bytes=%(progress.downloaded_bytes)d,total_bytes=%(progress.total_bytes)d,",
+                    "speed=%(progress.speed)d",
+                ),
+                "--print", "@[download-path] %(filename)s",
+                "--print", "before_dl:@[before-dl-path] %(filename)s",
+                "--print", "pre_process:@[pre-process-path] %(filename)s",
+                "--print", "post_process:@[post-process-path] %(filename)s",
+                "--print", "after_move:@[after-move-path] %(filename)s",
+            ])
+            // filepaths
+            .arg("--ffmpeg-location")
+            .arg(ffmpeg_location)
+            .arg("--output")
+            .arg(output_filepath.as_os_str());
+        command
+    }
+
+    pub fn get_version(&self) -> anyhow::Result<String> {
+        let output = Command::new(self.semaphore.command.as_os_str())
+            .arg("--version")
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let version = stdout.to_string();
+        Ok(version)
+    }
+}
+
+
+impl Drop for YtdlpUserHandle {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.semaphore.state.lock() {
+            state.total_users = state.total_users.saturating_sub(1);
+        }
+    }
+}
+
+#[derive(Error,Debug)]
+pub enum YtdlpUpdateHandleAcquireError {
+    #[error("Unable to update while users are active {total_users}")]
+    UsersActive { total_users: usize },
+    #[error("Update already in progress")]
+    UpdateAlreadyInProgress,
+}
+
+#[derive(Error, Debug)]
+pub enum YtdlpUpdateError {
+    #[error("Failed to run command: {0:?}")]
+    CommandFail(#[from] std::io::Error),
+}
+
+pub struct YtdlpUpdateHandle {
+    semaphore: Arc<YtdlpSemaphore>,
+}
+
+impl YtdlpUpdateHandle {
+    fn try_acquire(semaphore: &Arc<YtdlpSemaphore>) -> Result<Self, YtdlpUpdateHandleAcquireError> {
+        let mut state = semaphore.state.lock().unwrap();
+        log::debug!("Trying to acquire update handle: users={0} updating={1}", state.total_users, state.is_updating);
+        if state.total_users > 0 {
+            return Err(YtdlpUpdateHandleAcquireError::UsersActive { total_users: state.total_users });
+        }
+        if state.is_updating {
+            return Err(YtdlpUpdateHandleAcquireError::UpdateAlreadyInProgress);
+        }
+        state.is_updating = true;
+        drop(state);
+
+        let semaphore = semaphore.clone();
+        Ok(Self { semaphore })
+    }
+
+    pub fn update(&self) -> Result<String, YtdlpUpdateError> {
+        let output = Command::new(self.semaphore.command.as_os_str())
+            .arg("--verbose")
+            .arg("--update")
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result = stdout.to_string();
+        Ok(result)
+    }
+}
+
+impl Drop for YtdlpUpdateHandle {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.semaphore.state.lock() {
+            state.is_updating = false;
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Ytdlp {
+    semaphore: Arc<YtdlpSemaphore>,
+}
+
+impl Ytdlp {
+    pub fn new(command: Arc<PathBuf>) -> Self {
+        let semaphore = Arc::new(YtdlpSemaphore::new(command));
+        Self { semaphore }
+    }
+
+    pub fn try_acquire_user_handle(&self) -> Result<YtdlpUserHandle, YtdlpUserHandleAcquireError> {
+        YtdlpUserHandle::try_acquire(&self.semaphore)
+    }
+
+    pub fn try_acquire_update_handle(&self) -> Result<YtdlpUpdateHandle, YtdlpUpdateHandleAcquireError> {
+        YtdlpUpdateHandle::try_acquire(&self.semaphore)
+    }
 }
 
 #[derive(Clone,Copy,Debug,Default,Serialize)]
