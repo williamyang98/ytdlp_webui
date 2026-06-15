@@ -7,12 +7,6 @@ import { use_toasts_store } from '../stores/toast';
 const cached_api = use_cached_api_store();
 const toast = use_toasts_store();
 
-onMounted(() => {
-  if (cached_api.ytdlp_version === null) {
-    void cached_api.get_ytdlp_version();
-  }
-});
-
 const is_ytdlp_busy = ref(false);
 async function get_ytdlp_version() {
   try {
@@ -37,6 +31,13 @@ async function request_ytdlp_update() {
     is_ytdlp_busy.value = false;
   }
 }
+
+onMounted(() => {
+  if (cached_api.ytdlp_version === null) {
+    void get_ytdlp_version();
+  }
+});
+
 
 </script>
 
