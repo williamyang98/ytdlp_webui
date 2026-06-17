@@ -10,7 +10,6 @@ async-lock = { version = "3.4.2" }
 anyhow = { version = "1.0.102" }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 clap = { version = "4.5.4", features = ["derive"] }
-dashmap = { version = "6.0.1" }
 derive_more = { version = "2.1.1", features = ["as_ref", "debug", "display", "from", "into"] }
 diesel = { version = "2.3.9", features = ["sqlite", "r2d2"] }
 diesel_migrations = { version = "2.3.2" }

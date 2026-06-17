@@ -6,10 +6,10 @@ use crate::util::get_unix_time;
 use crate::worker_download::DownloadWorkers;
 use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
 use youtube_api::VideoItem;
-use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
 use anyhow::Context;
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -172,7 +172,7 @@ pub struct TranscodeWorkers {
     threadpool: Arc<AppThreadPool>,
     app_config: Arc<AppConfig>,
     download_workers: Arc<DownloadWorkers>,
-    cache: DashMap<TranscodeKey, Arc<TranscodeWorker>>,
+    cache: Mutex<HashMap<TranscodeKey, Arc<TranscodeWorker>>>,
 }
 
 impl TranscodeWorkers {
@@ -187,20 +187,23 @@ impl TranscodeWorkers {
             threadpool,
             app_config,
             download_workers,
-            cache: DashMap::new(),
+            cache: Mutex::new(HashMap::new()),
         }
     }
     pub fn get_worker(&self, key: &TranscodeKey) -> Option<Arc<TranscodeWorker>> {
-        self.cache.get(key).as_deref().cloned()
+        let cache = self.cache.lock().unwrap();
+        cache.get(key).cloned()
     }
 
     pub fn delete_worker(&self, key: &TranscodeKey) -> Option<Arc<TranscodeWorker>> {
-        self.cache.remove(key).map(|(_key, value)| value)
+        let mut cache = self.cache.lock().unwrap();
+        cache.remove(key)
     }
 
     pub fn start_worker(&self, key: &TranscodeKey, video_info: Option<Arc<VideoItem>>) -> anyhow::Result<Arc<TranscodeWorker>> {
         // check cache hit
-        if let Some(worker) = self.cache.get(key) {
+        let mut cache = self.cache.lock().unwrap();
+        if let Some(worker) = cache.get(key) {
             let state = worker.state.lock().unwrap();
             if state.worker_status.is_healthy() {
                 return Ok(worker.clone());
@@ -208,7 +211,8 @@ impl TranscodeWorkers {
         }
         // new cache item
         let worker = Arc::new(TranscodeWorker::new(key.clone()));
-        let _old_worker = self.cache.insert(key.clone(), worker.clone());
+        let _old_worker = cache.insert(key.clone(), worker.clone());
+        drop(cache);
         // check database item
         if let Some(db_entry) = self.database.connect()?.select_ffmpeg_entry(key)? {
             if db_entry.status == WorkerStatus::Finished {

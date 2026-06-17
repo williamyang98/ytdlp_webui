@@ -1,17 +1,17 @@
-use dashmap::DashMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId};
 use std::hash::Hash;
-use std::sync::Arc;
-use async_lock::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use async_lock::Mutex as AsyncMutex;
 use std::path::{Path, PathBuf};
 use std::io::Write;
 use anyhow::Context;
 use crate::app_config::AppConfig;
 
 // shared handle and shared value with mutex to protect on disk persistent cache
-type Cache<K,V> = DashMap<K, Arc<Mutex<Option<Arc<V>>>>>;
+type Cache<K,V> = Mutex<HashMap<K, Arc<AsyncMutex<Option<Arc<V>>>>>>;
 
 pub struct YoutubeApiCache {
     api: Api,
@@ -33,8 +33,8 @@ impl YoutubeApiCache {
         create_folder(&videos_folder)?;
         create_folder(&playlists_folder)?;
 
-        let videos_cache = DashMap::new();
-        let playlists_cache = DashMap::new();
+        let videos_cache = Mutex::new(HashMap::new());
+        let playlists_cache = Mutex::new(HashMap::new());
         let api = Api::default();
         Ok(Self {
             api,
@@ -82,10 +82,13 @@ impl YoutubeApiCache {
         K: Hash + Eq + Clone,
         V: DeserializeOwned + Serialize,
     {
-        let cache_entry_lock = cache
-            .entry(key.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(None)))
-            .clone();
+        let cache_entry_lock = {
+            let mut cache = cache.lock().unwrap();
+            cache
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(AsyncMutex::new(None)))
+                .clone()
+        };
 
         let mut cache_entry = cache_entry_lock.lock().await;
 

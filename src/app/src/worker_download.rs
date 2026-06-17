@@ -5,9 +5,9 @@ use crate::util::get_unix_time;
 use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
 use crate::ytdlp;
 use anyhow::Context;
-use dashmap::DashMap;
 use derive_more::Debug;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
@@ -184,7 +184,7 @@ pub struct DownloadWorkers {
     threadpool: Arc<AppThreadPool>,
     app_config: Arc<AppConfig>,
     ytdlp: Arc<ytdlp::Ytdlp>,
-    cache: DashMap<VideoId, Arc<DownloadWorker>>,
+    cache: Mutex<HashMap<VideoId, Arc<DownloadWorker>>>,
 }
 
 impl DownloadWorkers {
@@ -194,21 +194,24 @@ impl DownloadWorkers {
             threadpool,
             app_config,
             ytdlp,
-            cache: DashMap::new(),
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn get_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
-        self.cache.get(video_id).as_deref().cloned()
+        let cache = self.cache.lock().unwrap();
+        cache.get(video_id).cloned()
     }
 
     pub fn delete_worker(&self, video_id: &VideoId) -> Option<Arc<DownloadWorker>> {
-        self.cache.remove(video_id).map(|(_key, value)| value)
+        let mut cache = self.cache.lock().unwrap();
+        cache.remove(video_id)
     }
 
     pub fn start_worker(&self, video_id: &VideoId) -> anyhow::Result<Arc<DownloadWorker>> {
         // check cache hit
-        if let Some(worker) = self.cache.get(video_id) {
+        let mut cache = self.cache.lock().unwrap();
+        if let Some(worker) = cache.get(video_id) {
             let state = worker.state.lock().unwrap();
             if state.worker_status.is_healthy() {
                 return Ok(worker.clone());
@@ -216,7 +219,8 @@ impl DownloadWorkers {
         }
         // new cache item
         let worker = Arc::new(DownloadWorker::new(video_id.clone()));
-        let _old_worker = self.cache.insert(video_id.clone(), worker.clone());
+        let _old_worker = cache.insert(video_id.clone(), worker.clone());
+        drop(cache);
         // check database item
         if let Some(db_entry) = self.database.connect()?.select_ytdlp_entry(video_id)? {
             if db_entry.status == WorkerStatus::Finished {
