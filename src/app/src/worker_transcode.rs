@@ -4,13 +4,12 @@ use crate::database::{TranscodeKey, Database, WorkerStatus};
 use crate::ffmpeg;
 use crate::util::get_unix_time;
 use crate::worker_download::DownloadWorkers;
-use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
+use crate::process::Process;
 use youtube_api::VideoItem;
 use derive_more::Debug;
 use serde::Serialize;
 use anyhow::Context;
 use std::collections::HashMap;
-use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
@@ -133,40 +132,6 @@ impl TranscodeWorker {
     }
 }
 
-#[derive(Clone)]
-struct FfmpegStderrHandler {
-    worker: Arc<TranscodeWorker>,
-}
-
-impl FfmpegStderrHandler {
-    pub fn new(worker: Arc<TranscodeWorker>) -> Self {
-        Self {
-            worker,
-        }
-    }
-}
-
-impl ProcessPipeHandler for FfmpegStderrHandler {
-    fn read_line(&self, line: &str) -> ControlFlow<()> {
-        match ffmpeg::parse_stderr_line(line) {
-            None => (),
-            Some(ffmpeg::ParsedStderrLine::TranscodeSourceInfo(ref info)) => {
-                log::debug!("[transcode] id={0} info={1:?}", self.worker.key.as_str(), info);
-                self.worker.state.lock().unwrap().update_from_source_info(info);
-            },
-            Some(ffmpeg::ParsedStderrLine::TranscodeProgress(ref progress)) => {
-                log::debug!("[transcode] id={0} progress={1:?}", self.worker.key.as_str(), progress);
-                self.worker.state.lock().unwrap().update_from_progress(progress);
-            },
-        }
-        ControlFlow::Continue(())
-    }
-
-    fn finish(&self) {
-
-    }
-}
-
 pub struct TranscodeWorkers {
     database: Arc<Database>,
     threadpool: Arc<AppThreadPool>,
@@ -247,7 +212,6 @@ impl TranscodeWorkers {
             let key = key.clone();
             let database = self.database.clone();
             let app_config = self.app_config.clone();
-            let threadpool = self.threadpool.clone();
             let download_workers = self.download_workers.clone();
             let worker = worker.clone();
             let video_info = video_info.clone();
@@ -287,40 +251,70 @@ impl TranscodeWorkers {
                 // get output filepath
                 let output_dirpath = format!("{0}_{1}", key.video_id.as_str(), key.audio_ext.as_str());
                 let output_dirpath = app_config.transcodes_folder.join(output_dirpath);
+                std::fs::create_dir_all(&output_dirpath)
+                    .with_context(|| format!("Failed to create folder for transcode worker: {0}", output_dirpath.to_string_lossy()))?;
+
                 let output_filepath = output_dirpath.join(key.as_str());
                 let output_filepath = std::path::absolute(&output_filepath)
                     .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_filepath.to_string_lossy()))?;
-                let relative_output_filepath = app_config.get_relative_data_path(&output_filepath)
-                    .with_context(|| format!("Failed to get relative output filepath from: {0}", output_filepath.to_string_lossy()))?;
                 // setup process
-                let mut process = ProcessWorker::new(threadpool.transcodes_stdout.clone(), threadpool.transcodes_stderr.clone(), &output_dirpath);
                 let command = create_transcode_command(&key, &input_filepath, &output_filepath, video_info.as_deref(), &app_config)?;
+                let mut process = Process::new(command);
                 process.label = Some(format!("transcode_{0}", key.as_str()));
-                let stderr_handler = FfmpegStderrHandler::new(worker.clone());
-                process.stderr_handler = Some(Box::new(stderr_handler));
-                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
+                process.system_log_filename = Some(output_dirpath.join("system.log"));
+                process.stdout_filename = Some(output_dirpath.join("stderr.log"));
+                process.stderr_filename = Some(output_dirpath.join("stdout.log"));
+                process.stderr_handler = Some(Box::new({
+                    let worker = worker.clone();
+                    move |line: Option<&str>| {
+                        let Some(line) = line else {
+                            return;
+                        };
+                        match ffmpeg::parse_stderr_line(line) {
+                            None => (),
+                            Some(ffmpeg::ParsedStderrLine::TranscodeSourceInfo(ref info)) => {
+                                log::debug!("[transcode] id={0} info={1:?}", worker.key.as_str(), info);
+                                worker.state.lock().unwrap().update_from_source_info(info);
+                            },
+                            Some(ffmpeg::ParsedStderrLine::TranscodeProgress(ref progress)) => {
+                                log::debug!("[transcode] id={0} progress={1:?}", worker.key.as_str(), progress);
+                                worker.state.lock().unwrap().update_from_progress(progress);
+                            },
+                        }
+                    }
+                }));
+                // update logging files
+                let as_relative_filepath = |path: Option<&PathBuf>| -> Option<String> {
+                    let path = path.as_ref()?;
+                    let Ok(path) = app_config.get_relative_data_path(path) else {
+                        return None;
+                    };
+                    Some(path.to_string_lossy().to_string())
+                };
                 database
                     .connect()?
-                    .select_and_update_ffmpeg_entry(&key, move |entry| {
-                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
+                    .select_and_update_ffmpeg_entry(&key, {
+                        let system_log_path = as_relative_filepath(process.system_log_filename.as_ref());
+                        let stdout_log_path = as_relative_filepath(process.stdout_filename.as_ref());
+                        let stderr_log_path = as_relative_filepath(process.stderr_filename.as_ref());
+                        move |entry| {
+                            entry.system_log_path = system_log_path;
+                            entry.stdout_log_path = stdout_log_path;
+                            entry.stderr_log_path = stderr_log_path;
+                        }
                     })?;
-                if let Err(err) = process.run(command) {
+                if let Err(err) = process.run() {
                     return Err(anyhow::anyhow!("Failed to run process: {err:?}"));
                 }
-                // update logging files
-                let stdout_filepath = app_config.get_relative_data_path(&process.stdout_filename)?;
-                let stderr_filepath = app_config.get_relative_data_path(&process.stderr_filename)?;
-                database
-                    .connect()?
-                    .select_and_update_ffmpeg_entry(&key, move |entry| {
-                        entry.stdout_log_path = Some(stdout_filepath.to_string_lossy().to_string());
-                        entry.stderr_log_path = Some(stderr_filepath.to_string_lossy().to_string());
-                        entry.audio_path = Some(relative_output_filepath.to_string_lossy().to_string());
-                    })?;
                 // validate output file exists
                 if !output_filepath.is_file() {
                     return Err(anyhow::anyhow!("Output file is missing: {0}", output_filepath.to_string_lossy()));
                 }
+                database
+                    .connect()?
+                    .select_and_update_ffmpeg_entry(&key, move |entry| {
+                        entry.audio_path = as_relative_filepath(Some(&output_filepath));
+                    })?;
                 Ok(())
             }
         };

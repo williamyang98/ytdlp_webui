@@ -2,13 +2,12 @@ use crate::app::AppThreadPool;
 use crate::app_config::AppConfig;
 use crate::database::{Database, WorkerStatus};
 use crate::util::get_unix_time;
-use crate::worker_process::{ProcessPipeHandler, ProcessWorker};
+use crate::process::Process;
 use crate::ytdlp;
 use anyhow::Context;
 use derive_more::Debug;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use uuid::Uuid;
@@ -99,86 +98,6 @@ impl DownloadWorker {
     }
 }
 
-#[derive(Clone)]
-struct YtdlpStdoutHandler {
-    worker: Arc<DownloadWorker>,
-    download_path: Arc<Mutex<Option<String>>>,
-}
-
-impl YtdlpStdoutHandler {
-    pub fn new(worker: Arc<DownloadWorker>) -> Self {
-        Self {
-            worker,
-            download_path: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-impl ProcessPipeHandler for YtdlpStdoutHandler {
-    fn read_line(&self, line: &str) -> ControlFlow<()> {
-        match ytdlp::parse_stdout_line(line) {
-            None => (),
-            Some(ytdlp::ParsedStdoutLine::DownloadProgress(ref progress)) => {
-                log::debug!("[download] id={0} progress={1:?}", self.worker.video_id.as_str(), progress);
-                self.worker.state.lock().unwrap().update_from_ytdlp(progress);
-            },
-            Some(ytdlp::ParsedStdoutLine::OutputPath(path)) => {
-                *self.download_path.lock().unwrap() = Some(path);
-            },
-        }
-        ControlFlow::Continue(())
-    }
-
-    fn finish(&self) {
-
-    }
-}
-
-#[derive(Clone)]
-struct YtdlpStderrHandler {
-    extract_path: Arc<Mutex<Option<anyhow::Result<String>>>>,
-}
-
-impl Default for YtdlpStderrHandler {
-    fn default() -> Self {
-        Self {
-            extract_path: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-impl ProcessPipeHandler for YtdlpStderrHandler {
-    fn read_line(&self, line: &str) -> ControlFlow<()> {
-        match ytdlp::parse_stderr_line(line) {
-            None => ControlFlow::Continue(()),
-            Some(ytdlp::ParsedStderrLine::UsageError(message)) => {
-                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Usage error: {message}")));
-                ControlFlow::Break(())
-            },
-            Some(ytdlp::ParsedStderrLine::ExtractPath(path)) => {
-                *self.extract_path.lock().unwrap() = Some(Ok(path));
-                ControlFlow::Continue(())
-            },
-            Some(ytdlp::ParsedStderrLine::VideoUnavailableError { video_id, message }) => {
-                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Video {video_id} unavailable: {message}")));
-                ControlFlow::Break(())
-            },
-            Some(ytdlp::ParsedStderrLine::AgeRestrictedError { video_id, message: _message }) => {
-                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Video {video_id} age restricted")));
-                ControlFlow::Break(())
-            },
-            Some(ytdlp::ParsedStderrLine::UnhandledError { video_id, message }) => {
-                *self.extract_path.lock().unwrap() = Some(Err(anyhow::anyhow!("Error downloading video {video_id}: {message}")));
-                ControlFlow::Break(())
-            },
-        }
-    }
-
-    fn finish(&self) {
-
-    }
-}
-
 pub struct DownloadWorkers {
     database: Arc<Database>,
     threadpool: Arc<AppThreadPool>,
@@ -255,7 +174,6 @@ impl DownloadWorkers {
             let video_id = video_id.clone();
             let database = self.database.clone();
             let app_config = self.app_config.clone();
-            let threadpool = self.threadpool.clone();
             let ytdlp = self.ytdlp.clone();
             let worker = worker.clone();
             move || -> anyhow::Result<()> {
@@ -266,34 +184,89 @@ impl DownloadWorkers {
                 let output_dirpath = app_config.downloads_folder.join(video_id.as_str());
                 let output_dirpath = std::path::absolute(&output_dirpath)
                     .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_dirpath.to_string_lossy()))?;
-                let mut process = ProcessWorker::new(threadpool.downloads_stdout.clone(), threadpool.downloads_stderr.clone(), &output_dirpath);
-                process.label = Some(format!("download_{0}", video_id.as_str()));
+                std::fs::create_dir_all(&output_dirpath)
+                    .with_context(|| format!("Failed to create folder for download worker: {0}", output_dirpath.to_string_lossy()))?;
                 let command = ytdlp.create_download_command(&video_id, &output_dirpath, &app_config.current_working_directory, &app_config.ffmpeg_command);
-                let stdout_handler = Box::new(YtdlpStdoutHandler::new(worker.clone()));
-                let stderr_handler = Box::new(YtdlpStderrHandler::default());
-                process.stdout_handler = Some(stdout_handler.clone());
-                process.stderr_handler = Some(stderr_handler.clone());
-                let system_log_filepath = app_config.get_relative_data_path(&process.system_log_filename)?;
+                let mut process = Process::new(command);
+                process.label = Some(format!("download_{0}", video_id.as_str()));
+                process.system_log_filename = Some(output_dirpath.join("system.log"));
+                process.stdout_filename = Some(output_dirpath.join("stderr.log"));
+                process.stderr_filename = Some(output_dirpath.join("stdout.log"));
+
+                let download_filepath = Arc::new(Mutex::new(None));
+                process.stdout_handler = Some(Box::new({
+                    let download_filepath = download_filepath.clone();
+                    let worker = worker.clone();
+                    move |line: Option<&str>| {
+                        let Some(line) = line else {
+                            return;
+                        };
+                        match ytdlp::parse_stdout_line(line) {
+                            None => (),
+                            Some(ytdlp::ParsedStdoutLine::DownloadProgress(ref progress)) => {
+                                log::debug!("[download] id={0} progress={1:?}", worker.video_id.as_str(), progress);
+                                worker.state.lock().unwrap().update_from_ytdlp(progress);
+                            },
+                            Some(ytdlp::ParsedStdoutLine::OutputPath(path)) => {
+                                *download_filepath.lock().unwrap() = Some(path);
+                            },
+                        }
+                    }
+                }));
+
+                let extract_filepath = Arc::new(Mutex::new(None));
+                process.stderr_handler = Some(Box::new({
+                    let extract_filepath = extract_filepath.clone();
+                    move |line: Option<&str>| {
+                        let Some(line) = line else {
+                            return;
+                        };
+                        match ytdlp::parse_stderr_line(line) {
+                            None => (),
+                            Some(ytdlp::ParsedStderrLine::UsageError(message)) => {
+                                *extract_filepath.lock().unwrap() = Some(Err(anyhow::anyhow!("Usage error: {message}")));
+                            },
+                            Some(ytdlp::ParsedStderrLine::ExtractPath(path)) => {
+                                *extract_filepath.lock().unwrap() = Some(Ok(path));
+                            },
+                            Some(ytdlp::ParsedStderrLine::VideoUnavailableError { video_id, message }) => {
+                                *extract_filepath.lock().unwrap() = Some(Err(anyhow::anyhow!("Video {video_id} unavailable: {message}")));
+                            },
+                            Some(ytdlp::ParsedStderrLine::AgeRestrictedError { video_id, message: _message }) => {
+                                *extract_filepath.lock().unwrap() = Some(Err(anyhow::anyhow!("Video {video_id} age restricted")));
+                            },
+                            Some(ytdlp::ParsedStderrLine::UnhandledError { video_id, message }) => {
+                                *extract_filepath.lock().unwrap() = Some(Err(anyhow::anyhow!("Error downloading video {video_id}: {message}")));
+                            },
+                        }
+                    }
+                }));
+                // update logging files
+                let as_relative_filepath = |path: Option<&PathBuf>| -> Option<String> {
+                    let path = path.as_ref()?;
+                    let Ok(path) = app_config.get_relative_data_path(path) else {
+                        return None;
+                    };
+                    Some(path.to_string_lossy().to_string())
+                };
                 database
                     .connect()?
-                    .select_and_update_ytdlp_entry(&video_id, move |entry| {
-                        entry.system_log_path = Some(system_log_filepath.to_string_lossy().to_string());
+                    .select_and_update_ytdlp_entry(&video_id, {
+                        let system_log_path = as_relative_filepath(process.system_log_filename.as_ref());
+                        let stdout_log_path = as_relative_filepath(process.stdout_filename.as_ref());
+                        let stderr_log_path = as_relative_filepath(process.stderr_filename.as_ref());
+                        move |entry| {
+                            entry.system_log_path = system_log_path;
+                            entry.stdout_log_path = stdout_log_path;
+                            entry.stderr_log_path = stderr_log_path;
+                        }
                     })?;
-                if let Err(err) = process.run(command) {
+                if let Err(err) = process.run() {
                     return Err(anyhow::anyhow!("Failed to run process: {err:?}"));
                 }
-                // update logging files
-                let stdout_filepath = app_config.get_relative_data_path(&process.stdout_filename)?;
-                let stderr_filepath = app_config.get_relative_data_path(&process.stderr_filename)?;
-                database
-                    .connect()?
-                    .select_and_update_ytdlp_entry(&video_id, move |entry| {
-                        entry.stdout_log_path = Some(stdout_filepath.to_string_lossy().to_string());
-                        entry.stderr_log_path = Some(stderr_filepath.to_string_lossy().to_string());
-                    })?;
                 // NOTE: Audio extractor for yt-dlp might not extract anything if the file extension remains the same
-                let download_filepath: Option<String> = stdout_handler.download_path.lock().unwrap().clone();
-                let extract_filepath = stderr_handler.extract_path.lock().unwrap()
+                let download_filepath: Option<String> = download_filepath.lock().unwrap().clone();
+                let extract_filepath = extract_filepath.lock().unwrap()
                     .take()
                     .transpose()?;
                 if let Some(filepath) = &download_filepath {
@@ -310,17 +283,11 @@ impl DownloadWorkers {
                 if !output_filepath.is_file() {
                     return Err(anyhow::anyhow!("Output filepath doesn't exist: {0}", output_filepath.to_string_lossy()));
                 }
-                let relative_output_filepath = match app_config.get_relative_data_path(&output_filepath) {
-                    Ok(path) => path,
-                    Err(err) => {
-                        return Err(anyhow::anyhow!("Failed to get relative output filepath: {0}", err));
-                    },
-                };
-                log::debug!("Got ytdlp relative output filepath: {0}", relative_output_filepath.to_string_lossy());
+                log::debug!("Got ytdlp output filepath: {0}", output_filepath.to_string_lossy());
                 database
                     .connect()?
                     .select_and_update_ytdlp_entry(&video_id, move |entry| {
-                        entry.audio_path = Some(relative_output_filepath.to_string_lossy().to_string());
+                        entry.audio_path = as_relative_filepath(Some(&output_filepath));
                     })?;
                 Ok(())
             }

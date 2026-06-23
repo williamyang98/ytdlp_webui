@@ -13,23 +13,14 @@ use threadpool::ThreadPool;
 
 pub struct AppThreadPool {
     pub downloads_worker: Arc<ThreadPool>,
-    pub downloads_stdout: Arc<ThreadPool>,
-    pub downloads_stderr: Arc<ThreadPool>,
     pub transcodes_worker: Arc<ThreadPool>,
-    pub transcodes_stdout: Arc<ThreadPool>,
-    pub transcodes_stderr: Arc<ThreadPool>,
 }
 
 impl AppThreadPool {
     pub fn new(size: usize) -> Self {
-        let create = || Arc::new(ThreadPool::new(size));
         Self {
-            downloads_worker: create(),
-            downloads_stdout: create(),
-            downloads_stderr: create(),
-            transcodes_worker: create(),
-            transcodes_stdout: create(),
-            transcodes_stderr: create(),
+            downloads_worker: Arc::new(ThreadPool::new(size)),
+            transcodes_worker: Arc::new(ThreadPool::new(size)),
         }
     }
 }
