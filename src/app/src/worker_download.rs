@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use uuid::Uuid;
 use youtube_api::VideoId;
 
@@ -183,12 +183,12 @@ pub struct DownloadWorkers {
     database: Arc<Database>,
     threadpool: Arc<AppThreadPool>,
     app_config: Arc<AppConfig>,
-    ytdlp: Arc<ytdlp::Ytdlp>,
+    ytdlp: Arc<RwLock<ytdlp::Ytdlp>>,
     cache: Mutex<HashMap<VideoId, Arc<DownloadWorker>>>,
 }
 
 impl DownloadWorkers {
-    pub fn new(database: Arc<Database>, threadpool: Arc<AppThreadPool>, app_config: Arc<AppConfig>, ytdlp: Arc<ytdlp::Ytdlp>) -> Self {
+    pub fn new(database: Arc<Database>, threadpool: Arc<AppThreadPool>, app_config: Arc<AppConfig>, ytdlp: Arc<RwLock<ytdlp::Ytdlp>>) -> Self {
         Self {
             database,
             threadpool,
@@ -256,16 +256,19 @@ impl DownloadWorkers {
             let database = self.database.clone();
             let app_config = self.app_config.clone();
             let threadpool = self.threadpool.clone();
-            let ytdlp_user_handle = self.ytdlp.try_acquire_user_handle()?;
+            let ytdlp = self.ytdlp.clone();
             let worker = worker.clone();
             move || -> anyhow::Result<()> {
+                let Ok(ytdlp) = ytdlp.try_read() else {
+                    return Err(anyhow::anyhow!("Ytdlp is busy updating"));
+                };
                 // setup process
                 let output_dirpath = app_config.downloads_folder.join(video_id.as_str());
                 let output_dirpath = std::path::absolute(&output_dirpath)
                     .with_context(|| format!("Failed to get absolute output filepath from: {0}", output_dirpath.to_string_lossy()))?;
                 let mut process = ProcessWorker::new(threadpool.downloads_stdout.clone(), threadpool.downloads_stderr.clone(), &output_dirpath);
                 process.label = Some(format!("download_{0}", video_id.as_str()));
-                let command = ytdlp_user_handle.create_download_command(&video_id, &output_dirpath, &app_config.current_working_directory, &app_config.ffmpeg_command);
+                let command = ytdlp.create_download_command(&video_id, &output_dirpath, &app_config.current_working_directory, &app_config.ffmpeg_command);
                 let stdout_handler = Box::new(YtdlpStdoutHandler::new(worker.clone()));
                 let stderr_handler = Box::new(YtdlpStderrHandler::default());
                 process.stdout_handler = Some(stdout_handler.clone());

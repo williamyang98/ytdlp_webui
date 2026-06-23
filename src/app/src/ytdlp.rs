@@ -1,58 +1,35 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Serialize;
-use thiserror::Error;
 use youtube_api::VideoId;
 
-#[derive(Default)]
-struct YtdlpState {
-    is_updating: bool,
-    total_users: usize,
+#[derive(Debug)]
+pub struct Ytdlp {
+    command: PathBuf,
 }
 
-struct YtdlpSemaphore {
-    state: Arc<Mutex<YtdlpState>>,
-    command: Arc<PathBuf>,
-}
-
-impl YtdlpSemaphore {
-    fn new(command: Arc<PathBuf>) -> Self {
-        let state = Arc::new(Mutex::new(YtdlpState::default()));
-        Self { state, command }
+impl Ytdlp {
+    pub fn new(command: PathBuf) -> Self {
+        Self { command }
     }
-}
 
-pub struct YtdlpUserHandle {
-    semaphore: Arc<YtdlpSemaphore>,
-}
-
-#[derive(Error,Debug)]
-pub enum YtdlpUserHandleAcquireError {
-    #[error("Update in progress")]
-    UpdateInProgress,
-}
-
-impl YtdlpUserHandle {
-    fn try_acquire(semaphore: &Arc<YtdlpSemaphore>) -> Result<Self, YtdlpUserHandleAcquireError> {
-        let mut state = semaphore.state.lock().unwrap();
-        if state.is_updating {
-            return Err(YtdlpUserHandleAcquireError::UpdateInProgress);
-        }
-        state.total_users += 1;
-        drop(state);
-
-        let semaphore = semaphore.clone();
-        Ok(Self { semaphore })
+    pub fn update(&mut self) -> std::io::Result<String> {
+        let output = Command::new(self.command.as_os_str())
+            .arg("--verbose")
+            .arg("--update")
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result = stdout.to_string();
+        Ok(result)
     }
 
     pub fn create_download_command(&self, video_id: &VideoId, output_dirpath: &Path, current_working_directory: &Path, ffmpeg_location: &Path) -> Command {
         let youtube_url = format!("https://www.youtube.com/watch?v={0}", video_id.as_str());
         // Can't canonicalize since path doesn't exist yet
         let output_filepath = output_dirpath.join("%(id)s.%(ext)s");
-        let mut command = Command::new(self.semaphore.command.as_os_str());
+        let mut command = Command::new(self.command.as_os_str());
         command
             .current_dir(current_working_directory)
             .arg(youtube_url)
@@ -87,95 +64,12 @@ impl YtdlpUserHandle {
     }
 
     pub fn get_version(&self) -> std::io::Result<String> {
-        let output = Command::new(self.semaphore.command.as_os_str())
+        let output = Command::new(self.command.as_os_str())
             .arg("--version")
             .output()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let version = stdout.to_string();
         Ok(version)
-    }
-}
-
-
-impl Drop for YtdlpUserHandle {
-    fn drop(&mut self) {
-        if let Ok(mut state) = self.semaphore.state.lock() {
-            state.total_users = state.total_users.saturating_sub(1);
-        }
-    }
-}
-
-#[derive(Error,Debug)]
-pub enum YtdlpUpdateHandleAcquireError {
-    #[error("Unable to update while users are active {total_users}")]
-    UsersActive { total_users: usize },
-    #[error("Update already in progress")]
-    UpdateAlreadyInProgress,
-}
-
-#[derive(Error, Debug)]
-pub enum YtdlpUpdateError {
-    #[error("Failed to run command: {0:?}")]
-    CommandFail(#[from] std::io::Error),
-}
-
-pub struct YtdlpUpdateHandle {
-    semaphore: Arc<YtdlpSemaphore>,
-}
-
-impl YtdlpUpdateHandle {
-    fn try_acquire(semaphore: &Arc<YtdlpSemaphore>) -> Result<Self, YtdlpUpdateHandleAcquireError> {
-        let mut state = semaphore.state.lock().unwrap();
-        log::debug!("Trying to acquire update handle: users={0} updating={1}", state.total_users, state.is_updating);
-        if state.total_users > 0 {
-            return Err(YtdlpUpdateHandleAcquireError::UsersActive { total_users: state.total_users });
-        }
-        if state.is_updating {
-            return Err(YtdlpUpdateHandleAcquireError::UpdateAlreadyInProgress);
-        }
-        state.is_updating = true;
-        drop(state);
-
-        let semaphore = semaphore.clone();
-        Ok(Self { semaphore })
-    }
-
-    pub fn update(&self) -> Result<String, YtdlpUpdateError> {
-        let output = Command::new(self.semaphore.command.as_os_str())
-            .arg("--verbose")
-            .arg("--update")
-            .output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let result = stdout.to_string();
-        Ok(result)
-    }
-}
-
-impl Drop for YtdlpUpdateHandle {
-    fn drop(&mut self) {
-        if let Ok(mut state) = self.semaphore.state.lock() {
-            state.is_updating = false;
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Ytdlp {
-    semaphore: Arc<YtdlpSemaphore>,
-}
-
-impl Ytdlp {
-    pub fn new(command: Arc<PathBuf>) -> Self {
-        let semaphore = Arc::new(YtdlpSemaphore::new(command));
-        Self { semaphore }
-    }
-
-    pub fn try_acquire_user_handle(&self) -> Result<YtdlpUserHandle, YtdlpUserHandleAcquireError> {
-        YtdlpUserHandle::try_acquire(&self.semaphore)
-    }
-
-    pub fn try_acquire_update_handle(&self) -> Result<YtdlpUpdateHandle, YtdlpUpdateHandleAcquireError> {
-        YtdlpUpdateHandle::try_acquire(&self.semaphore)
     }
 }
 

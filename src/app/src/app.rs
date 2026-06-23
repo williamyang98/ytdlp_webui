@@ -8,7 +8,7 @@ use crate::ytdlp::Ytdlp;
 use youtube_api::{PlaylistId, PlaylistItem, VideoId, VideoItem};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use threadpool::ThreadPool;
 
 pub struct AppThreadPool {
@@ -42,7 +42,7 @@ pub struct App {
     transcode_workers: Arc<TranscodeWorkers>,
     download_workers: Arc<DownloadWorkers>,
     youtube_api_cache: Arc<YoutubeApiCache>,
-    ytdlp: Arc<Ytdlp>,
+    ytdlp: Arc<RwLock<Ytdlp>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,7 +66,7 @@ impl App {
         let database = Arc::new(database);
         database.connect()?.run_pending_migrations();
 
-        let ytdlp = Arc::new(Ytdlp::new(Arc::new(app_config.ytdlp_command.clone())));
+        let ytdlp = Arc::new(RwLock::new(Ytdlp::new(app_config.ytdlp_command.clone())));
         let threadpool = Arc::new(AppThreadPool::new(app_config.total_transcode_threads));
         let download_workers = Arc::new(DownloadWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), ytdlp.clone()));
         let transcode_workers = Arc::new(TranscodeWorkers::new(database.clone(), threadpool.clone(), app_config.clone(), download_workers.clone()));
@@ -248,15 +248,19 @@ impl App {
     }
 
     pub fn get_ytdlp_version(&self) -> anyhow::Result<String> {
-        let ytdlp_user_handle = self.ytdlp.try_acquire_user_handle()?;
-        let result = ytdlp_user_handle.get_version();
+        let Ok(ytdlp) = self.ytdlp.try_read() else {
+            return Err(anyhow::anyhow!("Ytdlp is busy updating"));
+        };
+        let result = ytdlp.get_version();
         let version = result?;
         Ok(version)
     }
 
     pub fn update_ytdlp_version(&self) -> anyhow::Result<String> {
-        let ytdlp_update_handle = self.ytdlp.try_acquire_update_handle()?;
-        let result = ytdlp_update_handle.update();
+        let Ok(mut ytdlp) = self.ytdlp.try_write() else {
+            return Err(anyhow::anyhow!("Ytdlp is running and cannot update"));
+        };
+        let result = ytdlp.update();
         let output = result?;
         Ok(output)
     }
