@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { workspace = true }
-async-lock = { workspace = true }
 anyhow = { workspace = true }
 bytemuck = { workspace = true }
 derive_more = { workspace = true }
@@ -26,6 +24,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 threadpool = { workspace = true }
 time = { workspace = true }
+tokio = { workspace = true }
 uuid = { workspace = true }
 which = { workspace = true }
 youtube_api = { path = "../youtube_api", features = ["diesel"] }

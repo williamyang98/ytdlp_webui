@@ -4,9 +4,9 @@ use youtube_api::{Api, VideoItem, VideoId, PlaylistItem, PlaylistId};
 use std::hash::Hash;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use async_lock::Mutex as AsyncMutex;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex as AsyncMutex;
 use anyhow::Context;
 use crate::app_config::AppConfig;
 
