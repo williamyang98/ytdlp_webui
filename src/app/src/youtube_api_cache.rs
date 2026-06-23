@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use async_lock::Mutex as AsyncMutex;
 use std::path::{Path, PathBuf};
-use std::io::Write;
+use tokio::io::AsyncWriteExt;
 use anyhow::Context;
 use crate::app_config::AppConfig;
 
@@ -108,7 +108,7 @@ impl YoutubeApiCache {
                 return Ok(None);
             }
             let path = path.to_owned();
-            let data = actix_web::web::block(move || std::fs::read_to_string(path)).await??;
+            let data = tokio::fs::read_to_string(path).await?;
             let response: V = serde_json::from_str(data.as_str())?;
             Ok(Some(response))
         };
@@ -130,9 +130,10 @@ impl YoutubeApiCache {
 
         let write_to_filepath = async |path: &Path, value: &V| -> anyhow::Result<()> {
             let path = path.to_owned();
-            let mut file = actix_web::web::block(move || std::fs::File::create(path)).await??;
+            let mut file = tokio::fs::File::create(path).await?;
             let text = serde_json::to_string(value)?;
-            file.write_all(text.as_bytes())?;
+            file.write_all(text.as_bytes()).await?;
+            file.flush().await?;
             Ok(())
         };
 

@@ -265,7 +265,10 @@ pub async fn get_youtube_playlist(req: HttpRequest, path: web::Path<String>, par
 #[actix_web::get("/ytdlp/update")]
 pub async fn request_ytdlp_update(req: HttpRequest) -> actix_web::Result<HttpResponse> {
     let app = req.app_data::<Arc<App>>().unwrap().clone();
-    let output = app.update_ytdlp_version().await.map_err(ApiError::internal_server)?;
+    let task = actix_web::web::block(move || app.update_ytdlp_version())
+        .await
+        .map_err(ApiError::internal_server)?;
+    let output = task.map_err(ApiError::internal_server)?;
     let response = HttpResponse::Ok()
         .content_type("text/plain")
         .body(output);
@@ -275,8 +278,10 @@ pub async fn request_ytdlp_update(req: HttpRequest) -> actix_web::Result<HttpRes
 #[actix_web::get("/ytdlp/version")]
 pub async fn get_ytdlp_version(req: HttpRequest) -> actix_web::Result<HttpResponse> {
     let app = req.app_data::<Arc<App>>().unwrap().clone();
-    let version = app.get_ytdlp_version().await.map_err(ApiError::internal_server)?;
-    log::debug!("getting ytdlp version");
+    let task = actix_web::web::block(move || app.get_ytdlp_version())
+        .await
+        .map_err(ApiError::internal_server)?;
+    let version = task.map_err(ApiError::internal_server)?;
     let response = HttpResponse::Ok()
         .content_type("text/plain")
         .body(version);

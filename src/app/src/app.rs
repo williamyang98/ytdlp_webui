@@ -247,16 +247,16 @@ impl App {
         Ok(Some(path))
     }
 
-    pub async fn get_ytdlp_version(&self) -> anyhow::Result<String> {
+    pub fn get_ytdlp_version(&self) -> anyhow::Result<String> {
         let ytdlp_user_handle = self.ytdlp.try_acquire_user_handle()?;
-        let result = actix_web::web::block(move || ytdlp_user_handle.get_version()).await?;
+        let result = ytdlp_user_handle.get_version();
         let version = result?;
         Ok(version)
     }
 
-    pub async fn update_ytdlp_version(&self) -> anyhow::Result<String> {
+    pub fn update_ytdlp_version(&self) -> anyhow::Result<String> {
         let ytdlp_update_handle = self.ytdlp.try_acquire_update_handle()?;
-        let result = actix_web::web::block(move || ytdlp_update_handle.update()).await?;
+        let result = ytdlp_update_handle.update();
         let output = result?;
         Ok(output)
     }

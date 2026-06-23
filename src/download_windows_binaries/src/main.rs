@@ -33,7 +33,7 @@ fn validate_is_directory_empty_or_exists(s: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     if std::env::var("RUST_LOG").is_err() {

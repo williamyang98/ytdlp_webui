@@ -11,4 +11,4 @@ serde_json = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
-actix-web = { workspace = true }
+tokio = { workspace = true }

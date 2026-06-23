@@ -58,7 +58,7 @@ fn validate_is_file_exists(s: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let total_transcode_threads: usize = match args.total_transcode_threads {

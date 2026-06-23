@@ -59,9 +59,9 @@ dependencies = [
 
 [[package]]
 name = "actix-http"
-version = "3.12.1"
+version = "3.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93acb4a42f64936f9b8cae4a433b237599dd6eb6ed06124eb67132ef8cc90662"
+checksum = "48e2faa3e7418ed780cca54829d32782a4008a077230f67457caa063415e99c2"
 dependencies = [
  "actix-codec",
  "actix-rt",
@@ -75,7 +75,7 @@ dependencies = [
  "derive_more",
  "encoding_rs",
  "flate2",
- "foldhash 0.1.5",
+ "foldhash 0.2.0",
  "futures-core",
  "h2 0.3.27",
  "http 0.2.12",
@@ -170,9 +170,9 @@ dependencies = [
 
 [[package]]
 name = "actix-web"
-version = "4.13.0"
+version = "4.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff87453bc3b56e9b2b23c1cc0b1be8797184accf51d2abe0f8a33ec275d316bf"
+checksum = "df09e2d9239703dd64056359c920c7f3fba6535ec61a0059e0f44e095ffe02b4"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -189,7 +189,7 @@ dependencies = [
  "cookie",
  "derive_more",
  "encoding_rs",
- "foldhash 0.1.5",
+ "foldhash 0.2.0",
  "futures-core",
  "futures-util",
  "impl-more",
@@ -313,7 +313,6 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "app"
 version = "0.1.0"
 dependencies = [
- "actix-web",
  "anyhow",
  "async-lock",
  "bytemuck",
@@ -335,6 +334,7 @@ dependencies = [
  "thiserror 1.0.69",
  "threadpool",
  "time",
+ "tokio",
  "uuid",
  "which",
  "youtube_api",
@@ -780,7 +780,6 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 name = "download_windows_binaries"
 version = "0.1.0"
 dependencies = [
- "actix-web",
  "anyhow",
  "clap",
  "env_logger",
@@ -791,6 +790,7 @@ dependencies = [
  "log",
  "regex",
  "reqwest",
+ "tokio",
 ]
 
 [[package]]
@@ -1059,12 +1059,12 @@ dependencies = [
 name = "github_api"
 version = "0.1.0"
 dependencies = [
- "actix-web",
  "anyhow",
  "reqwest",
  "serde",
  "serde_json",
  "time",
+ "tokio",
 ]
 
 [[package]]
@@ -1133,7 +1133,6 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 name = "headless"
 version = "0.1.0"
 dependencies = [
- "actix-web",
  "anyhow",
  "app",
  "clap",
@@ -1145,6 +1144,7 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
+ "tokio",
  "youtube_api",
 ]
 
@@ -1425,9 +1425,9 @@ dependencies = [
 
 [[package]]
 name = "impl-more"
-version = "0.1.9"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8a5a9a0ff0086c7a148acb942baaabeadf9504d10400b5a05645853729b9cd2"
+checksum = "35a84fd5aa25fae5c0f4a33d9cac2ca017fc622cbd089be2229993514990f870"
 
 [[package]]
 name = "indexmap"
@@ -2622,7 +2622,19 @@ dependencies = [
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.6.3",
+ "tokio-macros",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3329,7 +3341,6 @@ dependencies = [
 name = "youtube_api"
 version = "0.1.0"
 dependencies = [
- "actix-web",
  "anyhow",
  "derive_more",
  "diesel",
@@ -3343,6 +3354,7 @@ dependencies = [
  "test-log",
  "thiserror 1.0.69",
  "time",
+ "tokio",
 ]
 
 [[package]]

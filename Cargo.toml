@@ -4,8 +4,9 @@ members = ["src/*"]
 
 [workspace.dependencies]
 actix-cors = { version = "0.7.1" }
-actix-files = { version = "0.6.6" }
-actix-web = { version = "4.8.0" }
+actix-files = { version = "0.6.10" }
+actix-web = { version = "4.14.0" }
+actix-rt = { version = "2.11.0" }
 async-lock = { version = "3.4.2" }
 anyhow = { version = "1.0.102" }
 bytemuck = { version = "1.25.0", features = ["derive"] }
@@ -32,6 +33,7 @@ test-log = { version = "0.2.20" }
 thiserror = { version = "1.0.63" }
 threadpool = { version = "1.8.1" }
 time = { version = "0.3.47", features = ["serde", "parsing", "formatting"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread", "fs"] }
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 which = { version = "8.0.2" }
 

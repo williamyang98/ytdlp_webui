@@ -86,7 +86,7 @@ impl YtdlpUserHandle {
         command
     }
 
-    pub fn get_version(&self) -> anyhow::Result<String> {
+    pub fn get_version(&self) -> std::io::Result<String> {
         let output = Command::new(self.semaphore.command.as_os_str())
             .arg("--version")
             .output()?;

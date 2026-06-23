@@ -8,7 +8,7 @@ pub use api::*;
 mod test {
     use crate::GithubApi;
 
-    #[actix_web::test]
+    #[tokio::test]
     async fn get_github_releases() {
         let api = GithubApi::default();
         let result = api.get_releases("williamyang98", "ytdlp_webui", 1, 1).await;
