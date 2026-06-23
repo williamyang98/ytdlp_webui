@@ -42,7 +42,9 @@ jobs:
 
     - name: Install packages
       shell: bash
-      run: ./scripts/download_ubuntu.sh
+      run: |
+        sudo apt-get update
+        ./scripts/download_ubuntu.sh
 
     - name: npm install packages
       shell: bash
